@@ -40,7 +40,7 @@ def find_anomaly_intervals(y):
 ## @param: marker: marker for time-series
 def plot_anomaly(X, y, start=0, end=sys.maxsize, title="", marker="-"):
     # Plot the data with highlighted anomaly
-    plt.figure(figsize=(12,2))
+    plt.figure(figsize=(14,2))
     plt.plot(np.arange(start,min(X.shape[0],end)), X[start:end], f"{marker}b")
     for (anom_start, anom_end) in find_anomaly_intervals(y):
         if start <= anom_end and anom_start <= anom_end:
@@ -320,7 +320,6 @@ def plotFig(data, label, score, slidingWindow, fileName, modelName, plotRange=No
     
     return df
 
-
 def plotFigRev(data, label, scores, slabels, slidingWindow, plotRange=None, y_pred=None, th=None, th_addd = None, fname='temp.png'):
     grader = metricor()
     
@@ -346,6 +345,15 @@ def plotFigRev(data, label, scores, slabels, slidingWindow, plotRange=None, y_pr
     plt.tick_params(labelbottom=False)
    
     plt.plot(data,'k', label='Normal-1')
+    # if len(data) < se[2]:
+        # plt.plot(range(se[2], se[3]), data[se[2]:se[3]],'b', label='Normal-2')
+    # if isinstance(se[0], int):        
+        # if se[0] > 0:
+            # plt.plot(range(se[0], se[1]), data[se[0]:se[1]], 'k')
+    # elif len(se[0]) >1:
+        # print('CHK:', se[0])
+        # for s1, s2 in zip(se[0], se[1]):
+            # plt.plot(range(s1, s2), data[s1:s2], 'k')
     if np.any(y_pred):
         plt.plot(y_pred[:max_length], 'c')
     for r in range_anomaly:
@@ -384,3 +392,16 @@ def plotFigRev(data, label, scores, slabels, slidingWindow, plotRange=None, y_pr
     plt.show()
     # plt.savefig(fname, bbox_inches='tight')
     # plt.savefig('two_normal_local.png', bbox_inches='tight')
+
+def plot_membership(clf, figsize=(14,2), delay=0):
+    plt.figure(figsize=figsize)
+    for i, mem in enumerate(clf.mem_nm):
+        # print(len(mem))
+        if len(mem) < len(clf.mem_nm[0]):
+            mem2 = mem[delay:]
+            mem2 = np.pad(mem, (len(clf.mem_nm[0])-len(mem), 0), 'constant', constant_values=0)
+            # print(len(mem2))
+        else: mem2 = mem
+        plt.plot(mem2, '.-', label=f'mem {i}')
+        # if i ==1: break
+    plt.show()

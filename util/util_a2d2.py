@@ -1,9 +1,19 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 import stumpy
+import sys
 import copy
-import math
+import pickle
+import torch
+
+
+from numpy.fft import fft, ifft
+# from util.TSB_AD.metrics import metricor
+# import matplotlib.patches as mpatches 
 
 from scipy.signal import argrelextrema, correlate
+# from scipy.cluster.hierarchy import dendrogram, linkage, fcluster, distance
 
 from statsmodels.tsa.stattools import acf
 
@@ -54,6 +64,22 @@ def _unshift_series(ts, sequence_rec,normalmodel_size):
 			result.append([seq[0]-int(shift),seq[1]-int(shift)])
 	return result
 
+
+# SBD distance
+def __sbd(x, y):
+	ncc = __ncc_c(x, y)
+	idx = ncc.argmax()
+	dist = 1 - ncc[idx]
+	return dist, None
+
+def __ncc_c(x, y):
+	den = np.array(norm(x) * norm(y))
+	den[den == 0] = np.Inf
+	x_len = len(x)
+	fft_size = 1 << (2*x_len-1).bit_length()
+	cc = ifft(fft(x, fft_size) * np.conj(fft(y, fft_size)))
+	cc = np.concatenate((cc[-(x_len-1):], cc[:x_len]))
+	return np.real(cc) / den
 ########################################################################################
 
 ########################################################################################
@@ -173,8 +199,11 @@ def offline_score(ts, pattern_length, nms, cl_s, normalize):
     # Compute score
     # ts_n = norm_seq(ts, normalize)
     all_join = []
-    for index_name in range(len(nms)):            
-        join = stumpy.stump(ts,pattern_length,nms[index_name].subseq,ignore_trivial = False, normalize=normalize)[:,0]
+    for index_name in range(len(nms)):   
+        if torch.cuda.is_available():
+            join = stumpy.gpu_stump(ts,pattern_length,nms[index_name].subseq,ignore_trivial = False, normalize=normalize)[:,0]
+        else:
+            join = stumpy.stump(ts,pattern_length,nms[index_name].subseq,ignore_trivial = False, normalize=normalize)[:,0]
         join = np.array(join)
 	    #join = (join - min(join))/(max(join) - min(join))
         all_join.append(join)
@@ -203,10 +232,27 @@ def backward_anomaly(ts, pattern_length, nm_subseq, normalize):
         score.append(np.linalg.norm(compute_diff_dist(nm_subseq, tmp_x_n)))
     return np.array(score)
 
-def backward_anomaly2(ts, pattern_length, nm_subseq, normalize):
+def backward_anomaly2(ts, pattern_length, nm_subseq, normalize, device_id=0):
     score = []
     ts_n = norm_seq(ts, normalize)
-    score = stumpy.stump(ts_n, pattern_length, nm_subseq, ignore_trivial=False, normalize=False)[:,0]
+    if torch.cuda.is_available():
+        score = stumpy.gpu_stump(ts_n, pattern_length, nm_subseq, device_id = device_id, ignore_trivial=False, normalize=False)[:,0]
+    else:
+        score = stumpy.stump(ts_n, pattern_length, nm_subseq, ignore_trivial=False, normalize=False)[:,0]
+    score = np.array(score)
+    return score
+
+def backward_anomaly_changing_point(ts, pattern_length, nms, normalize, device_id=0):
+    scores = []
+    ts_n = norm_seq(ts, normalize)
+    
+    for nm in nms:
+        if torch.cuda.is_available():
+            scores.append(stumpy.gpu_stump(ts_n, pattern_length, nm.subseq, device_id=device_id,ignore_trivial=False, normalize=False)[:,0])
+        else:
+            scores.append(stumpy.stump(ts_n, pattern_length, nm.subseq, ignore_trivial=False, normalize=False)[:,0])
+    score = np.min(scores, axis=0)
+
     score = np.array(score)
     return score
 
@@ -221,6 +267,16 @@ def align_score(NMs, scores, cl_s, slidingWindow):
             rev_scores[cl_s ==i] = tmp_sc
     rev_scores[rev_scores <0] = 0
     rev_scores = running_mean(rev_scores, slidingWindow)
-    rev_scores = np.array([rev_scores[0]]*math.ceil((slidingWindow-1)//2) + list(rev_scores) + rev_scores[-1]*(slidingWindow-1)//2)
+    rev_scores = np.array([rev_scores[0]]*((slidingWindow-1)//2) + list(rev_scores) + [rev_scores[-1]]*((slidingWindow-1)//2))
 
     return rev_scores
+
+def read_pickle(f_name):
+    with open(f_name, 'rb') as f:
+        return pickle.load(f)
+
+def write_pickle(f_name, data):
+    with open(f_name, 'wb') as f:
+        pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+        return True
+    
