@@ -6,7 +6,7 @@ from scipy.cluster.hierarchy import distance
 import stumpy
 import math
 
-from util.util_a2d2 import *
+from util.util_andri import *
 from util.ahc import membership, adaptive_ahc
 from util.plot_aadd import *
 from tqdm.notebook import tqdm
@@ -148,7 +148,7 @@ class windowL:
         return int(np.argmax(nm_mems))
 
 
-class A2D2():
+class AnDri():
 
     def __init__(self,pattern_length, normalize='zero-mean', linkage_method='ward', th_reverse=5, kadj=1, nm_len=2, overlap=0.5, max_W = 15, eta=1, REFINE=True, REVISE_SCORE=True, device_id=0):
         self.pattern_length = pattern_length
