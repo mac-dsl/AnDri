@@ -1,4 +1,6 @@
 # AnDri: Anomaly detection in the presence of Drift.
+# Overview
+![Image](https://github.com/user-attachments/assets/a330fad0-3023-40bd-b4ac-eeefcfab6b1b)
 
 ## References of this repository
 - https://github.com/TheDatumOrg/TSB-UAD
@@ -28,7 +30,7 @@ git clone https://github.com/mac-dsl/AnDri.git
 pip install -r requirements.txt
 ```
 
-## Benchmark
+## Datasets
 All are datasets and time series are stored in ./data. We describe below the different types of datasets used in our benchmark.
 1. ECG
 - The ECG dataset is a standard electrocardiogram dataset which comes from the MIT-BIH Arrhythmia database, where anomalies represent ventricular premature contractions. (Downloaded from https://github.com/TheDatumOrg/TSB-UAD/tree/main)
@@ -41,6 +43,7 @@ All are datasets and time series are stored in ./data. We describe below the dif
   
 4. Weather data
 - The Weather dataset is a hourly, geographically aggregated temperature and radiation information in Europe originated from the NASA MERRA-2. The original Weather dataset contained timestamp, each country's temperature, and radiation information from 1960-to-2020, but for the demo, we separated each country's temperature data from 2017-to-2020 and saved them into '.arff' files in the repository. (From Open Power System Data, https://doi.org/10.25832/weather_data/2020-09-16:)
+
 
 ## Usage
 We include main algorithms, 
