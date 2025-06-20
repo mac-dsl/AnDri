@@ -3,15 +3,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from util.TSB_AD.metrics import metricor
 from sklearn import metrics
-# from util.TSB_AD.slidingWindows import find_length #,plotFig, printResult
 from sklearn.preprocessing import MinMaxScaler
 from scipy import signal
-import os
-import sys
 import copy
 
-from util.plot_aadd import plotFigRev, find_anomaly_intervals
-from util.util_a2d2 import find_length, divide_subseq, norm_seq, running_mean
+from util.plot_andri import find_anomaly_intervals
+from util.util_andri import find_length, running_mean
 # from util.ahc import adaptive_ahc2
 
 # from scipy.io import arff
@@ -22,11 +19,12 @@ import random
 # from tqdm.notebook import tqdm
 import time
 import math
-from util.TranAD_base import *
-from util.TSB_AD.models.norma import NORMA
-from util.TSB_AD.models.a2d2 import A2D2
-from util.TSB_AD.models.sand import SAND
-from util.TSB_AD.models.damp import DAMP
+# from util.TranAD_base import *
+# from util.TSB_AD.models.norma import NORMA
+from util.TSB_AD.models.andri import AnDri
+# from util.TSB_AD.models.sand import SAND
+# from util.TSB_AD.models.damp import DAMP
+
 colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:purple', 'tab:brown', 'tab:olive', 'tab:pink', 'tab:cyan', 'tab:gray', 
           'blue', 'orange', 'green', 'purple','brown', 'gold', 'violet', 'cyan', 'pink', 'deepskyblue', 'lawngreen',
           'royalblue', 'darkgrey', 'darkorange', 'darkgreen','darkviolet','salmon','olivedrab','lightcoral','darkcyan','yellowgreen']
@@ -56,35 +54,9 @@ def get_acc(label, score, slidingWindow, ths=None):
         # print(L)
         
         precision, recall, AP = grader.metric_PR(label, score)
-        # print(f'Precision? {precision}, Recall? {recall}'
         
         result.loc[0] = [L[0], R_AUC, L[1], L[2], L[3], AP, R_AP, L[4], L[7]]
         return result
-
-
-def training_model(train_loader, test_loader, NN_model, labels, dataset):
-    ########################################################################
-    ## For training DNNs (in terms of TranAD and related references)
-
-    model, optimizer, scheduler, epoch, accuracy_list = load_model(NN_model, labels.shape[1])
-    
-    ## Prepare data
-    trainD, testD = next(iter(train_loader)), next(iter(test_loader))
-    trainO, testO = trainD, testD
-    if model.name in ['Attention', 'DAGMM', 'USAD', 'MSCRED', 'CAE_M', 'GDN', 'MTAD_GAT', 'MAD_GAN'] or 'TranAD' in model.name: 
-        trainD, testD = convert_to_windows(trainD, model), convert_to_windows(testD, model)
-        
-    ### Training phase
-    print(f'{color.HEADER}Training {NN_model} on {dataset}{color.ENDC}')
-    num_epochs = 5; e = epoch + 1; start = time()
-    for e in list(range(epoch+1, epoch+num_epochs+1)):
-        lossT, lr = backprop(e, model, trainD, trainO, optimizer, scheduler)
-        accuracy_list.append((lossT, lr))
-    print(color.BOLD+'Training time: '+"{:10.4f}".format(time()-start)+' s'+color.ENDC)
-    save_model(model, optimizer, scheduler, e, accuracy_list)
-	# plot_accuracies(accuracy_list, f'{args.model}_{args.dataset}')
-	# plot_accuracies(accuracy_list)
-    return model, testD, testO, optimizer, scheduler
 
 ##########################################################################################
 ## Inject anomalies
@@ -494,7 +466,8 @@ def get_anomalies(data, label):
 ## TSAD comparison
 
 def compare_methods(data, label, slidingWindow, train_len, data_name, 
-                    nm_len, overlap, kadj, normalize, selected_methods, stepwise=True, align=True, dist_org = True, cut=None, max_W = 20, REVISE_SCORE=True, delta =0, min_size=0.025, start_chunk=10000, chunk_size=5000, sp_index=1, x_lag=None, device_id=0):
+                    nm_len, overlap, kadj, normalize, selected_methods, stepwise=True, align=True, dist_org = True, cut=None, max_W = 20, 
+                    REVISE_SCORE=True, delta =0, min_size=0.025, start_chunk=10000, chunk_size=5000, sp_index=1, x_lag=None, device_id=0):
 
     # MIN_SIZE_ON = 0.025
     if data_name == 'elec':
@@ -522,101 +495,98 @@ def compare_methods(data, label, slidingWindow, train_len, data_name,
     process_time = []
 
     ## for TranAD
-    if 'TranAD' in selected_methods:
-        args.dataset = 'Data'
-        args.model = 'TranAD'
-        args.retrain = True
-        loader = []
+    # if 'TranAD' in selected_methods:
+        # args.dataset = 'Data'
+        # args.model = 'TranAD'
+        # args.retrain = True
+        # loader = []
+# 
+        # print('Test: TranAD')
+        # loader.append(x_test[:int(train_len)].reshape(int(train_len),1))
+        # loader.append(x_test.reshape(len(x_test),1))
+        # loader.append(label.reshape(len(label),1))
+        # train_loader = DataLoader(loader[0], batch_size=loader[0].shape[0])
+        # test_loader = DataLoader(loader[1], batch_size=loader[1].shape[0])
+        # label_tranad = loader[2]
+# 
+        # start_t = time()
+        # model, testD, testO, optimizer, scheduler = training_model(train_loader, test_loader, args.model, label_tranad, args.dataset)
+# 
+        ## Testing phase
+        # torch.zero_grad = True
+        # model.eval()
+        # print(f'{color.HEADER}Testing {args.model} on {args.dataset}{color.ENDC}')
+        # loss, y_pred = backprop(0, model, testD, testO, optimizer, scheduler, training=False)
+        # end_t = time()
+        # process_time.append(end_t-start_t)
+        # print('TranAD-Done (takes)', end_t - start_t)
+# 
+        # data_tranad = loader[1].reshape(len(loader[1]),)
+        # label_tranad = label_tranad.reshape(len(label_tranad),)
+        # score = loss
+        # score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
+        # scores.append(score[:len(x_test)])
+        # slabels.append('TranAD (online)\nAnomaly Score')
+# 
+        # print(len(scores))
 
-        print('Test: TranAD')
-        loader.append(x_test[:int(train_len)].reshape(int(train_len),1))
-        loader.append(x_test.reshape(len(x_test),1))
-        loader.append(label.reshape(len(label),1))
-        train_loader = DataLoader(loader[0], batch_size=loader[0].shape[0])
-        test_loader = DataLoader(loader[1], batch_size=loader[1].shape[0])
-        label_tranad = loader[2]
-
-        start_t = time()
-        model, testD, testO, optimizer, scheduler = training_model(train_loader, test_loader, args.model, label_tranad, args.dataset)
-
-        ### Testing phase
-        torch.zero_grad = True
-        model.eval()
-        print(f'{color.HEADER}Testing {args.model} on {args.dataset}{color.ENDC}')
-        loss, y_pred = backprop(0, model, testD, testO, optimizer, scheduler, training=False)
-        end_t = time()
-        process_time.append(end_t-start_t)
-        print('TranAD-Done (takes)', end_t - start_t)
-
-        data_tranad = loader[1].reshape(len(loader[1]),)
-        label_tranad = label_tranad.reshape(len(label_tranad),)
-        score = loss
-        score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
-        scores.append(score[:len(x_test)])
-        slabels.append('TranAD (online)\nAnomaly Score')
-
-        print(len(scores))
-
-    if 'NormA' in selected_methods:
-        print('Test: NORMA-OFF')
-        # if normalize == 'z-norm': norma_norm = True
-        # else: norma_norm= False
-        # norma_norm = True
-        normalize_comp = 'z-norm' if dist_org else normalize
-
-        start_t = time()
-        clf_off = NORMA(pattern_length = slidingWindow, nm_size=3*slidingWindow, percentage_sel=1, normalize=normalize_comp)
-        clf_off.fit(x_test)
-        end_t = time()
-        process_time.append(end_t -start_t)
-        print('NormA-Done (takes)', end_t - start_t)
-        score = clf_off.decision_scores_
-        score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
-        score = np.array([score[0]]*((slidingWindow-1)//2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
-        scores.append(score[:len(x_test)])
-        slabels.append('NormA (off)\nAnomaly Score')
-    
-        print(len(scores))
-    if 'SAND' in selected_methods:
-        modelName='SAND (online)'
-        start_t = time()
-        clf = SAND(pattern_length=slidingWindow,subsequence_length=4*(slidingWindow))
-        x = data
-        clf.fit(x,online=True,alpha=0.5,init_length=start_chunk,batch_size=chunk_size,verbose=True,overlaping_rate=int(4*slidingWindow))
-        end_t = time()
-        process_time.append(end_t -start_t)
-        print('SAND-Done (takes)', end_t - start_t)
-        score = clf.decision_scores_
-        score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
-        scores.append(score[:len(x_test)])
-        slabels.append('SAND (online)\nAnomaly Score')
-
-        print(len(scores))
-    if 'DAMP' in selected_methods:
-        modelName='DAMP'
-        start_t = time()
-        normalize_comp = 'z-norm' if dist_org else normalize
-        clf = DAMP(m = slidingWindow,sp_index=sp_index, x_lag =x_lag, normalize=normalize_comp)
-        x = data
-        clf.fit(x)
-        end_t = time()
-        process_time.append(end_t -start_t)
-        print('DAMP-Done (takes)', end_t - start_t)
-        score = clf.decision_scores_
-        score = running_mean(score, slidingWindow)
-        score = np.array([score[0]]*math.ceil((slidingWindow-1)//2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
-        score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
-        scores.append(score[:len(x_test)])
-        slabels.append('DAMP (online)\nAnomaly Score')
-
-        print(len(scores))
+    # if 'NormA' in selected_methods:
+        # print('Test: NORMA-OFF')
+        # normalize_comp = 'z-norm' if dist_org else normalize
+# 
+        # start_t = time()
+        # clf_off = NORMA(pattern_length = slidingWindow, nm_size=3*slidingWindow, percentage_sel=1, normalize=normalize_comp)
+        # clf_off.fit(x_test)
+        # end_t = time()
+        # process_time.append(end_t -start_t)
+        # print('NormA-Done (takes)', end_t - start_t)
+        # score = clf_off.decision_scores_
+        # score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
+        # score = np.array([score[0]]*((slidingWindow-1)//2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
+        # scores.append(score[:len(x_test)])
+        # slabels.append('NormA (off)\nAnomaly Score')
+    # 
+        # print(len(scores))
+    # if 'SAND' in selected_methods:
+        # modelName='SAND (online)'
+        # start_t = time()
+        # clf = SAND(pattern_length=slidingWindow,subsequence_length=4*(slidingWindow))
+        # x = data
+        # clf.fit(x,online=True,alpha=0.5,init_length=start_chunk,batch_size=chunk_size,verbose=True,overlaping_rate=int(4*slidingWindow))
+        # end_t = time()
+        # process_time.append(end_t -start_t)
+        # print('SAND-Done (takes)', end_t - start_t)
+        # score = clf.decision_scores_
+        # score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
+        # scores.append(score[:len(x_test)])
+        # slabels.append('SAND (online)\nAnomaly Score')
+# 
+        # print(len(scores))
+    # if 'DAMP' in selected_methods:
+        # modelName='DAMP'
+        # start_t = time()
+        # normalize_comp = 'z-norm' if dist_org else normalize
+        # clf = DAMP(m = slidingWindow,sp_index=sp_index, x_lag =x_lag, normalize=normalize_comp)
+        # x = data
+        # clf.fit(x)
+        # end_t = time()
+        # process_time.append(end_t -start_t)
+        # print('DAMP-Done (takes)', end_t - start_t)
+        # score = clf.decision_scores_
+        # score = running_mean(score, slidingWindow)
+        # score = np.array([score[0]]*math.ceil((slidingWindow-1)//2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
+        # score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
+        # scores.append(score[:len(x_test)])
+        # slabels.append('DAMP (online)\nAnomaly Score')
+# 
+        # print(len(scores))
 
     if 'AnDri' in selected_methods:
         ## Offline
         modelName='AnDri (off)'
         print(f'R_min (off): {min_size}')
         start_t = time()
-        clf = A2D2(pattern_length=slidingWindow, normalize=normalize, linkage_method='ward', th_reverse=5, kadj=kadj, nm_len=nm_len, overlap=overlap, max_W=max_W, eta=1, device_id=device_id)
+        clf = AnDri(pattern_length=slidingWindow, normalize=normalize, linkage_method='ward', th_reverse=5, kadj=kadj, nm_len=nm_len, overlap=overlap, max_W=max_W, eta=1, device_id=device_id)
         x = data
         clf.fit(x, y=label, online=False, training=True, training_len=int(train_len), stump=False, stepwise=stepwise, align=align, cut=cut, min_size=min_size)
         end_t = time()
@@ -641,7 +611,7 @@ def compare_methods(data, label, slidingWindow, train_len, data_name,
         modelName='AnDri (on)'
         print(f'R_min (on): {min_size}')
         start_t = time()
-        clf = A2D2(pattern_length=slidingWindow, normalize=normalize, linkage_method='ward', th_reverse=5, kadj=kadj, nm_len=nm_len, overlap=overlap, max_W=max_W, eta=1, device_id=device_id, REVISE_SCORE=REVISE_SCORE)
+        clf = AnDri(pattern_length=slidingWindow, normalize=normalize, linkage_method='ward', th_reverse=5, kadj=kadj, nm_len=nm_len, overlap=overlap, max_W=max_W, eta=1, device_id=device_id, REVISE_SCORE=REVISE_SCORE)
         x = data
         # min_on = MIN_SIZE_ON if len(data)*min_size > train_len*MIN_SIZE_ON else min_size
         # min_on = len(data)/train_len*min_size
@@ -682,7 +652,7 @@ def result_acc(methods, scores, label, slidingWindow):
         result_org.loc[j] = [method] + list(r_tmp.loc[0])
         j+=1
 
-    display(result_org)
+    # display(result_org)
     return result_org
 
 def find_best_f1(score, label, chk=False):

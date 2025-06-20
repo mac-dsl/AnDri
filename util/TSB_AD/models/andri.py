@@ -1,21 +1,16 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import distance
-# from util.util_overlap import *
-# from util.adjacent_clustering import adaptive_ahc
-import stumpy
-import math
 
 from util.util_andri import *
 from util.ahc import membership, adaptive_ahc
-from util.plot_aadd import *
-from tqdm.notebook import tqdm
-# from sklearn.cluster import DBSCAN
-import logging
+from util.plot_andri import *
 
-colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:purple', 'tab:brown', 'tab:olive', 'tab:pink', 'tab:cyan', 'tab:gray', 
-          'blue', 'orange', 'green', 'purple','brown', 'gold', 'violet', 'cyan', 'pink', 'deepskyblue', 'lawngreen',
-          'royalblue', 'darkgrey', 'darkorange', 'darkgreen','darkviolet','salmon','olivedrab','lightcoral','darkcyan','yellowgreen']
+from enum import Enum
+
+class status_window(Enum):
+    ACTIVE =1
+    INACTIVE =2
+    ADD =3
 
 class NormalModel:
     def __init__(self, subseq, tau, nu, c_m, c_std, active=True):
@@ -61,13 +56,10 @@ class windowL:
         ## computing membership function for all normal models and change activeness
         nm_turn_act, nm_turn_inact = [], []
         for i, nm in enumerate(self.NM):
-
             m_t, d_t = membership(nm.subseq, seq, nm.tau, eta=1)
             self.mem[i] = np.append(self.mem[i], m_t)
             self.dist[i] = np.append(self.dist[i], d_t)
             self.avg_score[i] = np.append(self.avg_score[i], np.mean(self.dist[i]))
-            
-            # if len(self.seq) <= self.W and self.prepare_add == False : continue    ## Fill init. windows
 
             ## Queuing W
             if len(self.seq) > self.W:
@@ -85,11 +77,7 @@ class windowL:
                     print(f'[<-- Inactive]: NM {i} = {np.mean(curr_mem)}/{nm.nu}, at {idx}')
                     nm.set_active(False)
                     num_active -=1
-                    # if num_active <=0:
-                        # nm_f_idx =self.force_active()
-                        # num_active = 1
-                        # nm_turn_act.append(nm_f_idx)
-                    return_status.append('inactive')
+                    return_status.append(status_window.INACTIVE)
                     nm_turn_inact.append(i)
 
                 ## Inactive --> Active based on membership
@@ -97,12 +85,12 @@ class windowL:
                     print(f'[--> Active]: NM {i} = {np.mean(curr_mem)}/{nm.nu}, at {idx}')
                     nm.set_active(True)
                     num_active +=1
-                    return_status.append('active')
+                    return_status.append(status_window.ACTIVE)
                     nm_turn_act.append(i)
 
         if len(self.seq) > self.W: 
             if self.prepare_add:
-                return_status.append('add_NM')
+                return_status.append(status_window.ADD)
             else:
                 ## similar but small std cases
                 nm_idx = np.argmax([np.mean(self.mem[i]) for i in range(len(self.NM))])
@@ -110,16 +98,14 @@ class windowL:
                 if len(self.seq) > self.W and nm.active ==True and np.mean(self.mem[nm_idx]) > nm.nu:
                     if nm.tau < np.mean(self.dist[nm_idx])+3*np.std(self.dist[nm_idx]) and nm.std> np.std(self.dist[nm_idx]):
                         print(f'[{idx}], NM {i}, tau: {nm.tau:.2f} (M: {nm.m}, STD: {nm.std}) vs. {np.mean(self.dist[nm_idx])+3*np.mean(self.dist[nm_idx])}, (M: {np.mean(self.dist[nm_idx])}, STD: {np.mean(self.dist[nm_idx])})')
-                        return_status.append('inactive')
-                    # print(f'==> at {idx}: NM {i}, tau: {nm.tau:.2f}, but {np.mean(tmp_dist[:int(len(tmp_dist)*tmp_mem)])+3*np.std(tmp_dist[:int(len(tmp_dist)*tmp_mem)]):.2f}, (M: {np.mean(tmp_dist[:int(len(tmp_dist)*tmp_mem)]):.2f}, STD: {np.std(tmp_dist[:int(len(tmp_dist)*tmp_mem)]):.2f})')
-                    # print(f'-- nu: {nm.nu:.2f}, avg_mem: {np.mean(self.mem[i]):.2f}, {nm.active}')
+                        return_status.append(status_window.INACTIVE)
             
             del self.seq[0]
 
         if num_active <=0:
             nm_f_idx =self.force_active()
             num_active += 1
-            return_status.append('active')
+            return_status.append(status_window.ACTIVE)
             nm_turn_act.append(nm_f_idx)
 
         return return_status, nm_turn_act, nm_turn_inact
@@ -138,19 +124,15 @@ class windowL:
 
 
     def force_active(self):
-        # nm_mems = np.mean(self.mem[int(self.W/2):], axis=1)
         nm_mems = [np.mean(mem) for mem in self.mem]
-        # print('CHK1: ', nm_mems)
         self.NM[int(np.argmax(nm_mems))].set_active(True)
-        # print('FORCE:', int(np.argmax(nm_mems)), len(self.mem), [len(self.mem[i]) for i in range(len(self.NM))])
-        # for i, nm in enumerate(self.NM):
-            # if nm.active: print(f'[MEM] NM {i} = {nm_mems[i]}')
         return int(np.argmax(nm_mems))
 
 
 class AnDri():
 
-    def __init__(self,pattern_length, normalize='zero-mean', linkage_method='ward', th_reverse=5, kadj=1, nm_len=2, overlap=0.5, max_W = 15, eta=1, REFINE=True, REVISE_SCORE=True, device_id=0):
+    def __init__(self,pattern_length, normalize='zero-mean', linkage_method='ward', th_reverse=5, 
+                 kadj=1, nm_len=2, overlap=0.5, max_W = 15, eta=1, REVISE_SCORE=True, device_id=0):
         self.pattern_length = pattern_length
         self.normalize=normalize     
         self.overlap = overlap
@@ -161,7 +143,6 @@ class AnDri():
         self.seq_idx = 0
         self.eta = eta
         self.Z = []
-        self.REFINE=REFINE
         self.REVISE_SCORE = REVISE_SCORE
         # self.div_seq = div_seq
 
@@ -178,7 +159,7 @@ class AnDri():
         self.device_id = device_id
     
 
-    def __training(self, training_len, stump, stepwise, cut, min_size=0.025):
+    def __training(self, training_len, stepwise, min_size=0.025):
         """
         Training using Adjacent Hierarchical Clustering
         """
@@ -189,17 +170,17 @@ class AnDri():
         seqs_n = []
         if self.y is not None: n_subseq, n_label = divide_subseq(x_train, self.pattern_length, self.nm_len, overlap=self.overlap, label=y_train)
         else: n_subseq = divide_subseq(x_train, self.pattern_length, self.nm_len, overlap=self.overlap)
-        # print(f'CHECK: {training_len} = {len(x_train)}, and {len(n_subseq)}, {len(n_subseq[0])}')
+
         ## normalize subseqences
         for seq in n_subseq: seqs_n.append(norm_seq(seq, self.normalize))
         seqs_n = np.array(seqs_n)
         
         ## Adjacent Hierarchical Clustering TODO: zero-mean vs. SBD
-        listcluster, Z, m_subseq, m_tau, m_nu, _, __cached__, d_ci, d_c_std, Ws, _ = adaptive_ahc(seqs_n, linkage_method=self.linkage_method, th_reverse=self.th_reverse, kadj=self.kadj, eta=self.eta, max_W = self.max_W, cut=cut, min_size =min_size, REFINE=self.REFINE)
+        listcluster, Z, m_subseq, m_tau, m_nu, _, __cached__, d_ci, d_c_std, Ws, _ = adaptive_ahc(
+            seqs_n, linkage_method=self.linkage_method, th_reverse=self.th_reverse, kadj=self.kadj, eta=self.eta, max_W = self.max_W, min_size =min_size)
 
         if Ws is None: return None
         self.Z = Z
-        # dendo = dendrogram(Z)
         
         self.W = int(np.min([self.max_W, 2*np.max(Ws)]))
         for i in range(len(m_tau)):
@@ -212,8 +193,6 @@ class AnDri():
             self.mem_nm.append([])
             self.dist_nm.append([])
 
-        # print(f'[Num. of NM] ={len(self.NMs)}')
-        # print(f'Set of listcluster: {set(list(listcluster))}')
         self.listcluster = listcluster
         cl_list = np.array([])
         for lc in listcluster: cl_list = np.append(cl_list, np.ones(int(self.pattern_length*self.nm_len*(1-self.overlap)))*lc)
@@ -221,81 +200,65 @@ class AnDri():
         if len(cl_list) < len(x_train): cl_list = np.append(cl_list, np.ones(len(x_train)-len(cl_list))*(-1))
         self.cl_s = cl_list
         
-        if stump:
-            ## Compute anomaly score
-            if self.normalize == 'z-norm': 
-                normalize = True
+        self.cl_s = []
+        before_status = False
+        for i in range(0, len(x_train), self.pattern_length):
+            x_test = x_train[i:i+self.pattern_length]
+            x_test_n = norm_seq(x_test, self.normalize)
+            for j, nm in enumerate(self.NMs): 
+                m_j, d_j = membership(nm.subseq, x_test_n, nm.tau, eta=1)
+                self.mem_nm[j] = np.append(self.mem_nm[j], m_j)
+                self.dist_nm[j] = np.append(self.dist_nm[j], d_j)
+
+            score_cl, _ = [], []
+            ## For cluster members
+            if cl_list[i] != -1:
+                nm_idx = int(cl_list[i])
+                score = np.linalg.norm(compute_diff_dist(self.NMs[nm_idx].subseq, x_test_n))
+                self.cl_s = np.append(self.cl_s, np.ones(self.pattern_length) * nm_idx)                
+
             else:
-                normalize = False
-            self.scores, self.joins = offline_score(x_train, self.pattern_length, self.NMs, self.cl_s, normalize)
-        else:
-            self.cl_s = []
-            before_status = False
-            for i in range(0, len(x_train), self.pattern_length):
-                x_test = x_train[i:i+self.pattern_length]
-                x_test_n = norm_seq(x_test, self.normalize)
-                for j, nm in enumerate(self.NMs): 
-                    m_j, d_j = membership(nm.subseq, x_test_n, nm.tau, eta=1)
-                    self.mem_nm[j] = np.append(self.mem_nm[j], m_j)
-                    self.dist_nm[j] = np.append(self.dist_nm[j], d_j)
+                for j, nm in enumerate(self.NMs):
+                    score_cl.append(np.linalg.norm(compute_diff_dist(nm.subseq, x_test_n)))
 
-                score_cl, i_cl = [], []
-                ## For cluster members
-                if cl_list[i] != -1:
-                    # print('[CL LIST]', cl_list[i], len(self.NMs))
-                    nm_idx = int(cl_list[i])
-                    score = np.linalg.norm(compute_diff_dist(self.NMs[nm_idx].subseq, x_test_n))
-                    self.cl_s = np.append(self.cl_s, np.ones(self.pattern_length) * nm_idx)                
+                score = np.min(score_cl)
+                self.cl_s = np.append(self.cl_s, np.ones(self.pattern_length) * np.argmin(score_cl))
+                nm_idx = int(np.argmin(score_cl))
 
+            selected_nm = self.NMs[nm_idx]
+            selected_th = selected_nm.tau
+
+            if stepwise:
+                if i >= self.pattern_length: x_tests = x_train[i-self.pattern_length:i+self.pattern_length]
+                else: x_tests = x_train[i:i+self.pattern_length*2]
+                rev_score = backward_anomaly2(x_tests, self.pattern_length, self.NMs[nm_idx].subseq, self.normalize, self.device_id)
+                if i >= self.pattern_length: self.scores = np.append(self.scores, rev_score[:self.pattern_length])
+                else: self.scores = np.append(self.scores, rev_score[:self.pattern_length//2])
+            else:
+                ## Find sub-subseq. of anomalies
+                if score > selected_th:
+                    tmp_score = backward_anomaly(x_train[i-self.pattern_length:i+self.pattern_length], self.pattern_length, self.NMs[nm_idx].subseq, self.normalize)
+                    tmp_score = tmp_score/self.NMs[nm_idx].tau
+                    self.scores = np.append(self.scores, tmp_score)
+                    before_status = True
                 else:
-                    for j, nm in enumerate(self.NMs):
-                        score_cl.append(np.linalg.norm(compute_diff_dist(nm.subseq, x_test_n)))
-
-                    score = np.min(score_cl)
-                    self.cl_s = np.append(self.cl_s, np.ones(self.pattern_length) * np.argmin(score_cl))
-                    nm_idx = int(np.argmin(score_cl))
-                # print('[Train-CL]', nm_idx, cl_list[i])   
-
-                selected_nm = self.NMs[nm_idx]
-                # if i < self.pattern_length: selected_nm = self.NMs[nm_idx]
-                # elif self.cl_s[-1] == self.cl_s[-self.pattern_length-1]:
-                    # selected_nm = self.NMs[nm_idx]
-                # else:
-                    # selected_nm = movingWin.NM[int(self.cl_s[-self.pattern_length-1])]
-                selected_th = selected_nm.tau
-
-                if stepwise:
-                    if i >= self.pattern_length: x_tests = x_train[i-self.pattern_length:i+self.pattern_length]
-                    else: x_tests = x_train[i:i+self.pattern_length*2]
-                    rev_score = backward_anomaly2(x_tests, self.pattern_length, self.NMs[nm_idx].subseq, self.normalize, self.device_id)
-                    if i >= self.pattern_length: self.scores = np.append(self.scores, rev_score[:self.pattern_length])
-                    else: self.scores = np.append(self.scores, rev_score[:self.pattern_length//2])
-                    # self.scores = np.append(self.scores, rev_score[:self.pattern_length])
-                else:
-                    ## Find sub-subseq. of anomalies
-                    if score > selected_th:
+                    if before_status:
                         tmp_score = backward_anomaly(x_train[i-self.pattern_length:i+self.pattern_length], self.pattern_length, self.NMs[nm_idx].subseq, self.normalize)
                         tmp_score = tmp_score/self.NMs[nm_idx].tau
-                        # self.scores[-int(self.pattern_length/2):] = tmp_score[:int(self.pattern_length/2)]
-                        # self.scores = np.append(self.scores, np.pad(tmp_score[int(self.pattern_length/2):], (0, int(self.pattern_length/2)), constant_values=tmp_score[-1]))
                         self.scores = np.append(self.scores, tmp_score)
-                        before_status = True
                     else:
-                        if before_status:
-                            tmp_score = backward_anomaly(x_train[i-self.pattern_length:i+self.pattern_length], self.pattern_length, self.NMs[nm_idx].subseq, self.normalize)
-                            tmp_score = tmp_score/self.NMs[nm_idx].tau
-                            # self.scores[-int(self.pattern_length/2):] = tmp_score[:int(self.pattern_length/2)]
-                            # self.scores = np.append(self.scores, np.pad(tmp_score[int(self.pattern_length/2):], (0, int(self.pattern_length/2)), constant_values=tmp_score[-1]))
-                            self.scores = np.append(self.scores, tmp_score)
-                        else:
-                            self.scores = np.append(self.scores, np.ones(self.pattern_length)*score/self.NMs[nm_idx].tau)
-                        before_status = False
+                        self.scores = np.append(self.scores, np.ones(self.pattern_length)*score/self.NMs[nm_idx].tau)
+                    before_status = False
 
-                # if i%100==0:
-                    # print(f'---------------- {i}/{len(self.ts)} ')
-
-
-    def fit(self, X, y=None, online=True, training=True, delta=0, training_len=None, stump=False, stepwise=False, align=True, cut=None, min_size=0.025):
+    #  @params X: Time-series
+    #  @params y: labels (not necessary)
+    #  @params online: True (online), False (offline)
+    #  @params delta: default =0, W for best case (to revise scores)
+    #  @params training_len: training len in ratio (ex. 0.2 for 20%)
+    #  @params stepwise: default FALSE, for comparison only
+    #  @params align: default True (for aligning scores for multiple normal patterns)
+    #  @params min_size: ratio of minimum size of cluster (R_{min})
+    def fit(self, X, y=None, online=True, delta=0, training_len=None, stepwise=False, align=True, min_size=0.025):
         ## if overlapping is not 1, revise for loop 
         self.ts = X
         self.y = y
@@ -305,23 +268,17 @@ class AnDri():
                 print('[ERR]: Need to specify training length (>= 10% of data)')
                 return 0
             
-            self.__training(training_len, stump, stepwise, cut, min_size)
-            print('Train:', training_len, 'vs', len(self.scores), 'start:', training_len)
-            if len(self.scores) ==0:
-                return None
+            self.__training(training_len, stepwise, min_size)
+            # print('Train:', training_len, 'vs', len(self.scores), 'start:', training_len)
+            if len(self.scores) ==0: return None
 
             movingWin = windowL(self.W, self.pattern_length)
             ## Normal models are already saved.
             for nm in self.NMs: movingWin.update_NM(nm)
 
-            # mem_nm = []
-            # for i in range(len(self.NMs)): mem_nm.append([])
-
             print(f'START: {len(self.mem_nm)}, {len(self.mem_nm[0])}')
 
             ## Compute score for each subsequence 
-            
-            # for self.seq_idx in tqdm(range(training_len,len(X)-self.pattern_length, self.pattern_length)):
             self.seq_idx = training_len
             before_status = False
 
@@ -338,45 +295,33 @@ class AnDri():
                     print('Done')
                     break
 
-                rsts, nm_acts, nm_inacts = movingWin.enqueue(test_seq_n, self.seq_idx)
+                rsts, nm_acts, _ = movingWin.enqueue(test_seq_n, self.seq_idx)
 
-                ## Revise status
-                # for rst, nm_act, nm_inact in zip(rsts, nm_acts, nm_inacts):
-                ## (1) when at least one-inactive ==> prepare for adding new NM
-                ## (2) when at least one-active: revise score
-                ## (3) add_NM: initiate adding a new NM (? even if active exists?)
 
-                if 'active' in rsts:
-                    # chk_nu = [movingWin.NM[m].nu for m in nm_acts]
-                    # idx_act = nm_acts[int(np.argmax(chk_nu))]
-                    if self.REVISE_SCORE: self.revise_scores(movingWin, delta, nm_acts, stepwise, 'active')
+                if status_window.ACTIVE in rsts:
+                    if self.REVISE_SCORE: self.revise_scores(movingWin, delta, nm_acts, stepwise, status_window.ACTIVE)
 
-                elif 'inactive' in rsts:
+                elif status_window.INACTIVE in rsts:
                     if movingWin.W == self.W:
                         movingWin.W = self.W*2
                         movingWin.prepare_add = True
 
-                if 'add_NM' in rsts:
-                    # print(f'W: {movingWin.W} & {movingWin.prepare_add}')
-                    # new_NM, d_nm, new_len = self.add_new_NM(movingWin.seq, self.nm_len, self.overlap, movingWin.NM, self.seq_idx)
+                if status_window.ADD in rsts:
                     new_NM, d_nm, new_len = self.add_new_NM(self.ts[self.seq_idx-movingWin.W*self.pattern_length:self.seq_idx+self.pattern_length], self.nm_len, self.overlap, movingWin.NM, self.seq_idx)
                     if new_NM is not None:
                         if new_NM.tau > max([nm.tau for nm in self.NMs]): new_NM.tau = max([nm.tau for nm in self.NMs])
                         if new_NM.nu > max([nm.nu for nm in self.NMs]): new_NM.nu = max([nm.nu for nm in self.NMs])
                         self.NMs.append(new_NM)
                         movingWin.update_NM(new_NM)
-                        # movingWin.mem[-1] = np.append(movingWin.mem[-1], membership(new_NM.subseq, test_seq_n, new_NM.tau, eta=self.eta))
                         self.mem_nm.append([])
                         self.dist_nm.append([])
-                        # self.pattern_length = new_len
                         print(f'[==> Add NM]: NM# {len(self.NMs)-1}, TAU: {new_NM.tau}, Nu: {new_NM.nu}, LEN: {new_len}')
 
-                        if self.REVISE_SCORE: self.revise_scores(movingWin, delta, len(self.NMs)-1, stepwise, 'new')
+                        if self.REVISE_SCORE: self.revise_scores(movingWin, delta, len(self.NMs)-1, stepwise, status_window.ADD)
 
-                    movingWin.terminate_add(self.W) ## (4) clear W (reset)
+                    movingWin.terminate_add(self.W) 
                 
                 for j in range(len(movingWin.NM)):
-                    # print(f'++ {j} -->{len(movingWin.mem[j])}')
                     self.mem_nm[j] = np.append(self.mem_nm[j], movingWin.mem[j][-1])
                     self.dist_nm[j] = np.append(self.dist_nm[j], movingWin.dist[j][-1])
 
@@ -385,50 +330,29 @@ class AnDri():
                 for j, nm in enumerate(movingWin.NM):
                     if nm.active:
                         score_cl.append(movingWin.dist[j][-1])
-                        # score_tau.append(score_cl[-1]/nm.tau)
                         i_cl.append(j)
 
                 ## save current cluster, score
                 score, nm_idx = np.min(score_cl), i_cl[np.argmin(score_cl)]
-                # nm_idx = i_cl[np.argmin(score_tau)]
-                # score = score_cl[np.argmin(score_tau)]
                 self.cl_s = np.append(self.cl_s, nm_idx*np.ones(self.pattern_length))
 
-                # self.update_score(movingWin, nm_idx, score, stepwise)
                 if stepwise:
                     if self.seq_idx >= self.pattern_length:
                         x_tests = self.ts[self.seq_idx-self.pattern_length:self.seq_idx+self.pattern_length]
                     else: continue
 
                     ## Find sub-subseq. of anomalies
-                    # selected_nm = movingWin.NM[nm_idx] if self.cl_s[-1] == self.cl_s[-self.pattern_length-1] else movingWin.NM[int(self.cl_s[-self.pattern_length-1])]
                     if self.cl_s[-1] == self.cl_s[-self.pattern_length-1]:
                         selected_nm = movingWin.NM[nm_idx]
                         rev_score = backward_anomaly2(x_tests, self.pattern_length, selected_nm.subseq, self.normalize, device_id=self.device_id)
                     else:
                         selected_nm = movingWin.NM[nm_idx]
                         rev_score = backward_anomaly2(x_tests, self.pattern_length, selected_nm.subseq, self.normalize, device_id=self.device_id)
-                        # selected_nm = []
-                        # selected_nm.append(movingWin.NM[int(self.cl_s[-self.pattern_length-1])])
-                        # selected_nm.append(movingWin.NM[nm_idx])
-
-                        ## Check mid-subseq
-                        # score_cl_mid, i_cl_mid = [], []
-                        # seq_mid = norm_seq(self.ts[self.seq_idx-(self.pattern_length//2):self.seq_idx+(self.pattern_length//2)], self.normalize)
-                        # for nm_id, nm in enumerate(movingWin.NM):
-                            # if nm.active: 
-                                # score_cl_mid.append(np.linalg.norm(compute_diff_dist(nm.subseq, seq_mid)))
-                                # i_cl_mid.append(nm_id)
-                        ## print('SC:', score_cl_mid, i_cl_mid)
-                        # nm_mid = i_cl_mid[np.argmin(score_cl_mid)]
-                        # selected_nm.append(movingWin.NM[nm_mid])
-                        # rev_score = backward_anomaly_changing_point(x_tests, self.pattern_length, selected_nm, self.normalize)
                     
                     self.scores = np.append(self.scores, rev_score[:self.pattern_length])
                 else:
                     selected_th = selected_nm.tau
                     if score > selected_th:
-                        # print(f'AT {self.seq_idx}, Score: {score}, NM: {nm_idx}, TAU: {selected_th}')
                         tmp_score = backward_anomaly(self.ts[self.seq_idx-self.pattern_length:self.seq_idx+self.pattern_length], self.pattern_length, selected_nm.subseq, self.normalize)
                         tmp_score = tmp_score/selected_th
                         self.scores = np.append(self.scores, tmp_score)
@@ -444,12 +368,9 @@ class AnDri():
  
                 self.seq_idx += self.pattern_length
 
-                # if self.seq_idx%10000 ==0:
-                    # print(f'{self.seq_idx}/{len(self.ts)}')
-
         ## Offline method
         else:
-            self.__training(len(X), stump, stepwise, cut, min_size)
+            self.__training(len(X), stepwise, min_size)
             print(f'Offline scores len: {len(self.scores)}')
             if len(self.scores) == 0:
                 return None
@@ -465,9 +386,8 @@ class AnDri():
     def update_score(self, movingWin, curr_idx, nm_idx, score, stepwise, before_status):
         self.cl_s[curr_idx:curr_idx+self.pattern_length] = np.ones(self.pattern_length)*nm_idx
         x_tests = self.ts[curr_idx-self.pattern_length:curr_idx+self.pattern_length]
+        
         if stepwise:
-            
-            # selected_nm = movingWin.NM[nm_idx] if self.cl_s[-1] == self.cl_s[-self.pattern_length-1] else movingWin.NM[int(self.cl_s[-self.pattern_length-1])]
             if self.cl_s[curr_idx+1] == self.cl_s[curr_idx-self.pattern_length+1]:
                 selected_nm = movingWin.NM[nm_idx]
                 rev_score = backward_anomaly2(x_tests, self.pattern_length, selected_nm.subseq, self.normalize, device_id=self.device_id)
@@ -475,17 +395,6 @@ class AnDri():
                 selected_nm = []
                 selected_nm.append(movingWin.NM[int(self.cl_s[curr_idx-self.pattern_length+1])])
                 selected_nm.append(movingWin.NM[nm_idx])
-
-                ## Check mid-subseq
-                # score_cl_mid, i_cl_mid = [], []
-                # seq_mid = norm_seq(self.ts[curr_idx-(self.pattern_length//2):curr_idx+(self.pattern_length//2)], self.normalize)
-                # for nm_id, nm in enumerate(movingWin.NM):
-                #     if nm.active: 
-                #         score_cl_mid.append(np.linalg.norm(compute_diff_dist(nm.subseq, seq_mid)))
-                #         i_cl_mid.append(nm_id)
-                # # print('SC:', score_cl_mid, i_cl_mid)
-                # nm_mid = i_cl_mid[np.argmin(score_cl_mid)]
-                # selected_nm.append(movingWin.NM[nm_mid])
                 rev_score = backward_anomaly_changing_point(x_tests, self.pattern_length, selected_nm, self.normalize, device_id=self.device_id)
 
             
@@ -493,7 +402,6 @@ class AnDri():
             selected_nm = movingWin.NM[nm_idx]
             selected_th = selected_nm.tau
             if score > selected_th:
-                # print(f'AT {self.seq_idx}, Score: {score}, NM: {nm_idx}, TAU: {selected_th}')
                 tmp_score = backward_anomaly(x_tests, self.pattern_length, selected_nm.subseq, self.normalize)
                 tmp_score = tmp_score/selected_th
                 self.scores = np.append(self.scores, tmp_score)
@@ -502,9 +410,7 @@ class AnDri():
                 if before_status:
                     tmp_score = backward_anomaly(x_tests, self.pattern_length, selected_nm.subseq, self.normalize)
                     rev_score = tmp_score/selected_th
-                    # self.scores = np.append(self.scores, tmp_score)
                 else:
-                    # self.scores = np.append(self.scores, np.ones(self.pattern_length)*score/movingWin.NM[nm_idx].tau)
                     rev_score = np.ones(self.pattern_length)*score/movingWin.NM[nm_idx].tau
                 before_status=False
                 
@@ -512,25 +418,19 @@ class AnDri():
 
 
     ## After adding a new Normal Model, revise scores, cl_s, and memberships and distance for each NMs
-    def revise_scores(self, movingWin, delta, nm_ids, stepwise, added='new', before_status=False):
-        rev_cl_s,rev_scores = np.array([]), np.array([])
+    def revise_scores(self, movingWin, delta, nm_ids, stepwise, added=status_window.ADD, before_status=False):
+        # rev_cl_s,rev_scores = np.array([]), np.array([])
         before_status = False
-        # start_idx = self.seq_idx - movingWin.W*self.pattern_length
         if delta > movingWin.W*self.pattern_length: delta = movingWin.W*self.pattern_length
         start_idx = self.seq_idx - (delta-delta%self.pattern_length)
-        # print(f'*** After adding a new NM, WIN: {delta}, at {self.seq_idx} ==> {start_idx}')
-        # print('BEFORE: ', len(self.scores))
         
-        # for idx, seq in enumerate(movingWin.seq):
         while (start_idx < self.seq_idx):
-            # test_seq = self.ts[start_idx:start_idx+self.pattern_length]
             curr_cl = int(self.cl_s[start_idx+1])
             win_idx = int((self.seq_idx - start_idx)/self.pattern_length) -1
-            # print('WIN_IDX: ', win_idx, curr_cl, movingWin.W, len(movingWin.dist[curr_cl]), len(movingWin.seq), added)
             min_dist, min_j = movingWin.dist[curr_cl][-win_idx], curr_cl
 
             ## When active...
-            if added == 'active':
+            if added == status_window.ACTIVE:
                 ## Compare movingWin.dist & movingWin.mem
                 for j in nm_ids:
                     if min_dist > movingWin.dist[j][-win_idx]:
@@ -540,11 +440,10 @@ class AnDri():
                     continue
                 else:
                     ## update cl_s and scores
-                    # self.cl_s[start_idx:start_idx+self.pattern_length] = np.ones(self.pattern_length)*j
                     rev_score, before_status = self.update_score(movingWin, start_idx, min_j, min_dist, stepwise, before_status)
                     self.scores[start_idx-self.pattern_length//2-1:start_idx-self.pattern_length//2-1 + self.pattern_length] = rev_score[:self.pattern_length]
 
-            elif added == 'new':
+            elif added == status_window.ADD:
                 new_dist = np.linalg.norm(compute_diff_dist(movingWin.NM[nm_ids].subseq, self.ts[start_idx:start_idx+self.pattern_length]))
                 if min_dist > new_dist:
                     min_dist, min_j = new_dist, nm_ids
@@ -563,64 +462,6 @@ class AnDri():
 
             start_idx += self.pattern_length
 
-#             score_cl, i_cl, score_tau = [],[],[]
-#             for j, nm in enumerate(movingWin.NM):
-#                 if nm.active:
-#                     score_cl.append(np.linalg.norm(compute_diff_dist(nm.subseq, seq)))
-#                     score_tau.append(score_cl[-1]/nm.tau)
-#                     i_cl.append(j)
-#             self.cl_s[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = nm_idx*np.ones(len(seq))
-#             # print(f'{idx}  {movingWin.W}: {start_idx+idx*len(seq)}:{start_idx + (idx+1)*len(seq)} ==> {len(seq)}')
-# 
-#             ## Find sub-subseq. of anomalies
-#             if self.cl_s[start_idx + (idx)*len(seq)-1] == self.cl_s[start_idx + (idx+1)*len(seq)-1]:
-#                 selected_nm = movingWin.NM[nm_idx]
-#             else:
-#                 selected_nm = movingWin.NM[int(self.cl_s[start_idx + (idx+1)*len(seq)-1])]
-#             # selected_nm = movingWin.NM[nm_idx]
-#             selected_th = selected_nm.tau
-# 
-#             if stepwise:
-#                 x_tests = self.ts[start_idx + (idx-1)*len(seq):start_idx + (idx+1)*len(seq)]
-#                 rev_score = backward_anomaly2(x_tests, self.pattern_length, selected_nm.subseq, self.normalize)
-#                 # print('==== ', len(x_tests), len(rev_score), len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)]))
-#                 self.scores[(start_idx-len(seq)//2) + (idx)*len(seq):(start_idx-len(seq)//2) + (idx+1)*len(seq)] = rev_score[:self.pattern_length]
-#             else:
-#                 if score > selected_th:
-#                     tmp_score = backward_anomaly(self.ts[start_idx + (idx-1)*len(seq):start_idx + (idx+1)*len(seq)], self.pattern_length, selected_nm.subseq, self.normalize)
-#                     tmp_score = tmp_score/selected_th
-#                     if len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)]) < len(tmp_score):
-#                         tmp_len = len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)])
-#                         self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = tmp_score[:tmp_len]
-#                     else:                        
-#                         self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = tmp_score
-#                     before_status = True
-#                 else:
-#                     if before_status:
-#                         tmp_score = backward_anomaly(self.ts[start_idx + (idx-1)*len(seq):start_idx + (idx+1)*len(seq)], self.pattern_length, selected_nm.subseq, self.normalize)
-#                         tmp_score = tmp_score/selected_th
-#                         if len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)]) < len(tmp_score):
-#                             tmp_len = len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)])
-#                             self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = tmp_score[:tmp_len]
-#                         else:
-#                             self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = tmp_score
-#                     else:
-#                         tmp_len = len(self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)])
-#                         self.scores[start_idx + idx*len(seq):start_idx + (idx+1)*len(seq)] = np.ones(tmp_len)*score/selected_th
-#                     before_status=False
-#
-#            if added == 'new':
-#                ## -1: newly added NM
-#                m_t, d_t = membership(movingWin.NM[-1].subseq, seq, movingWin.NM[-1].tau, eta=1)
-#                # self.mem_nm[-1] = np.append(self.mem_nm[-1], movingWin.mem[-1]) 
-#                # self.dist_nm[-1] = np.append(self.dist_nm[-1], movingWin.dist[-1]) 
-#                self.mem_nm[-1] = np.append(self.mem_nm[-1], m_t) 
-#                self.dist_nm[-1] = np.append(self.dist_nm[-1], d_t)
-        
-        # if added == 'new':
-            # print(f'[NEW_NM]: {len(self.mem_nm[-1])} vs. {len(self.mem_nm[0])}')
-
-        # print('AFTER: ', len(self.scores), (start_idx+self.pattern_length//2))
 
     #  @params seqs: divided subsequences
     #  @params step: step for dividing subsequences
@@ -630,35 +471,23 @@ class AnDri():
         """
         Try to add new normal model online 
         """
-        ## merging sequences in the window
-        # t_seq = np.array([])
-        # for seq in seqs: t_seq = np.append(t_seq, seq)
 
         curr_len, chk_len = self.pattern_length, find_length(t_seq[::-1])
-
-        # if abs(curr_len - chk_len) / curr_len < 0.05: chk_len = curr_len  ## less than 5%
-        # elif chk_len <= curr_len/2: chk_len = curr_len
-        # elif chk_len >= curr_len*2: chk_len = curr_len
-
-        # if chk_len != curr_len: print('NEW_LEN: ', chk_len)
-
         chk_len = curr_len
 
         ## divide sequences with the new chk_len
-        # win_seqs = divide_subseq(rev_seq, chk_len, step, overlap)
         win_seqs = divide_subseq(t_seq, chk_len, step, 0)
         win_seqs_n = []
         for seq in win_seqs: win_seqs_n.append(norm_seq(seq, self.normalize))
         win_seqs_n = np.array(win_seqs_n)
-        # print('LEN of CHK:', chk_len, 'LEN of SEQ:', len(seqs), len(seqs[0]), len(win_seqs), len(win_seqs[0]))
-        listcluster, Z, m_subseq, m_tau, m_nu, _, _, d_ci, d_c_std, _, _ = adaptive_ahc(win_seqs_n, linkage_method='ward', th_reverse=10, kadj=1, eta=self.eta, max_W = self.max_W, isTrain=False, NMs=NMs)
+        listcluster, Z, m_subseq, m_tau, m_nu, _, _, d_ci, d_c_std, _, _ = adaptive_ahc(
+            win_seqs_n, linkage_method='ward', th_reverse=10, kadj=1, eta=self.eta, max_W = self.max_W, isTrain=False, NMs=NMs)
 
         if listcluster is None: return None, None, None
 
         ## number of members for each cluster
         nums, new_NM = [], []
         for i in range(int(max(listcluster)+1)): nums.append(len([k for k in listcluster if k==i]))
-        # print('Result of AHC:', set(listcluster), nums, len(m_subseq), '# Seq: ', len(seqs))
 
         j = 0
         for m_s, m_tau, m_nu, m_m, m_std in zip(m_subseq, m_tau, m_nu, d_ci, d_c_std):
@@ -667,30 +496,21 @@ class AnDri():
                 ## To resolve align error
                 temp_dist1 = np.linalg.norm(compute_diff_dist(nm.subseq, m_s[:len(nm.subseq)//2]))
                 temp_dist2 = np.linalg.norm(compute_diff_dist(nm.subseq, m_s[len(nm.subseq)//2:]))
-                temp_dist = (temp_dist1+temp_dist2) #* (curr_len/chk_len)
-                # print('COMPARE DIST:', nm_i, 'with', temp_dist, 'tau:', nm.tau, 'nu:', nm.nu)
+                temp_dist = (temp_dist1+temp_dist2) 
 
                 ## If new m_subseq. is similar to current NM, update tau instead of adding it
                 if temp_dist <= nm.tau:
                     ## Update selected NM (status) and tau
-                    # print('[Update] :', nm_i, 'with', temp_dist, 'tau:', nm.tau, 'nu:', nm.nu, nm.active, 'num:', nums[j])
                     if nm.active == False:
                         nm.set_active(True)
                         print(f'[--> Active2]: NM {nm_i} from exam. at {idx}')
-                        # nm.tau = (nm.tau + m_tau)/2
                         nm.nu = (nm.nu + m_nu)/2
-                        # print(f'[Revised] tau: {nm.tau}, nu: {nm.nu}')
 
                     nums[j] = 0
                     chk = False
-                    # print(f'[{j}] Similar to NM {nm_i}/{len(NMs)}: {temp_dist} < {nm.tau}, NUMS: {nums}, {temp_dist1}+{temp_dist2}')
                     break
-                # else:
-                    # print(f'[{j}] NOT Similar to NM {nm_i}/{len(NMs)}: {temp_dist} > {nm.tau}, NUMS: {nums}')
                 
-            # if m_nu < np.mean([nm.nu for nm in NMs]):
             if m_nu < np.min([nm.nu for nm in NMs]):
-                # print(f'[CHK NU]: new {m_nu} vs. curr {np.min([nm.nu for nm in NMs])}')
                 chk = False
                 nums[j] = 0
             elif chk:
@@ -700,33 +520,18 @@ class AnDri():
 
         for j in range(len(nums)-1, -1, -1): 
             if nums[j] == 0: del nums[j]
-        # print('After removing similar ones:', nums, len(new_NM))
 
         if len(new_NM) >0:
-            # plt.figure(figsize=(20,6))
-            # for j, nm in enumerate(NMs):
-                # if nm.active:
-                    # plt.plot(nm.subseq, label=f'ORG {j}')
-            # plt.legend()
-            # plt.show()
 
             new_n = []
-            # plt.figure(figsize=(20,6))
             for j, nm in enumerate(new_NM):
-                # plt.plot(nm.subseq, label=f'New {j, nums[j]}')
                 new_n.append(nm.subseq)
-            # plt.title('Possible New Normal Models')
-            # plt.legend()
-            # plt.show()
 
             d_m = distance.squareform(distance.pdist(new_n))
-            # print(d_m)
             if np.max(nums) == 0:
                 return None, None, None
             else:
-                # print(f'New NMs: # {nums}, tau: {new_NM[np.argmax(m_nu)].tau}, nu: {new_NM[np.argmax(m_nu)].nu}')
                 return new_NM[np.argmax(m_nu)], d_m, chk_len
-                # return new_NM[int(np.argmax(nums))], d_m, chk_len
         else:
             return None, None, None
 

@@ -1,19 +1,10 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
 import stumpy
-import sys
 import copy
 import pickle
 import torch
 
-
-from numpy.fft import fft, ifft
-# from util.TSB_AD.metrics import metricor
-# import matplotlib.patches as mpatches 
-
 from scipy.signal import argrelextrema, correlate
-# from scipy.cluster.hierarchy import dendrogram, linkage, fcluster, distance
 
 from statsmodels.tsa.stattools import acf
 
@@ -63,55 +54,30 @@ def _unshift_series(ts, sequence_rec,normalmodel_size):
 		if (len(ts[seq[0]-int(shift):seq[1]-int(shift)]) == normalmodel_size):
 			result.append([seq[0]-int(shift),seq[1]-int(shift)])
 	return result
-
-
-# SBD distance
-def __sbd(x, y):
-	ncc = __ncc_c(x, y)
-	idx = ncc.argmax()
-	dist = 1 - ncc[idx]
-	return dist, None
-
-def __ncc_c(x, y):
-	den = np.array(norm(x) * norm(y))
-	den[den == 0] = np.Inf
-	x_len = len(x)
-	fft_size = 1 << (2*x_len-1).bit_length()
-	cc = ifft(fft(x, fft_size) * np.conj(fft(y, fft_size)))
-	cc = np.concatenate((cc[-(x_len-1):], cc[:x_len]))
-	return np.real(cc) / den
 ########################################################################################
+
+
 
 ########################################################################################
 def divide_subseq(seq, slidingWindow, r, overlap=0.5, label=None):
     nm_size = round(slidingWindow*r)
     step = round(nm_size*(1-overlap))
-    if len(seq) < nm_size:
-        return None
-    # print('Stepsize:', step)
+    if len(seq) < nm_size: return None
     subseq = []
-    for i in range(0, len(seq)-nm_size, step):
-        # subseq.append(seq[i:i+slidingWindow])
-        subseq.append([i, i+nm_size])
-    # print('Num of subseq:', len(subseq), i)
+    for i in range(0, len(seq)-nm_size, step): subseq.append([i, i+nm_size])
 
     aligned_idx = _unshift_series(seq, subseq, nm_size)
     rev_idx= []
     for value in aligned_idx:
-         if value not in rev_idx:
-              rev_idx.append(value)
-
+         if value not in rev_idx: rev_idx.append(value)
 
     result, result_label = [], []
     for s_e in rev_idx:
         result.append(seq[s_e[0]:s_e[1]])
-        if label is not None:
-            result_label.append(label[s_e[0]:s_e[1]])
+        if label is not None: result_label.append(label[s_e[0]:s_e[1]])
 
-    if label is None:
-        return result
-    else:
-        return result, result_label
+    if label is None: return result
+    else: return result, result_label
 
 ## To use 'SBD', you have to divide subsequences with the length of self.pattern_length
 def norm_seq(seq, sel='zero-mean'):
@@ -142,29 +108,20 @@ def compute_diff_dist(seq_l, seq_s):
 
     idx = np.argmin(dist)
     d_v = np.array(seq_l[idx:idx+win_len]) - np.array(seq_s)
-    # return np.min(dist), np.argmin(dist), dist
     return d_v
 
 ## d_subseq should be normalized distance if normalize=True
 def intra_cluster_dist(d_subseq):
     num_cl = len(d_subseq)
     d_ci, d_c_std = [],[]
-    # print('# of CL: ', num_cl)
     for i in range(num_cl):
-        if len(d_subseq[i]) < 2:
-            continue
-        # d_t = [abs(seq) for seq in d_subseq[i]]
-        # # print('CL', i, 'has', len(d_t), 'members')
-        # d_ci.append(np.sum(d_t, axis=1))
-        # d_c_std.append(np.std(d_t, axis=1))
+        if len(d_subseq[i]) < 2: continue
+
         d_t = [np.linalg.norm(seq)/2 for seq in d_subseq[i]]
         ## take only top 95%
         d_t.sort()
-        # d_t = d_t[:int(len(d_t)*0.95)]
         d_ci.append(np.mean(d_t))
         d_c_std.append(np.std(d_t))
-
-    # th_ci = [(np.mean(d)+3*np.std(d))/2 for d in d_ci]
 
     return np.array(d_ci), np.array(d_c_std) #, th_ci
 
@@ -197,7 +154,6 @@ def running_mean(x,N):
 
 def offline_score(ts, pattern_length, nms, cl_s, normalize):
     # Compute score
-    # ts_n = norm_seq(ts, normalize)
     all_join = []
     for index_name in range(len(nms)):   
         if torch.cuda.is_available():
@@ -205,10 +161,8 @@ def offline_score(ts, pattern_length, nms, cl_s, normalize):
         else:
             join = stumpy.stump(ts,pattern_length,nms[index_name].subseq,ignore_trivial = False, normalize=normalize)[:,0]
         join = np.array(join)
-	    #join = (join - min(join))/(max(join) - min(join))
         all_join.append(join)
 
-    # join = np.min(all_join, axis=0)
     for i in range(len(all_join[0])):
         if cl_s[i] >=0: 
             join[i] = all_join[int(cl_s[i])][i]/nms[int(cl_s[i])].tau
@@ -219,18 +173,17 @@ def offline_score(ts, pattern_length, nms, cl_s, normalize):
 
     join = np.array([join[0]]*(pattern_length//2) + list(join) + [join[-1]]*(pattern_length//2))        
     join_n = running_mean(join,pattern_length)
-    # join_n = join
     #reshifting the score time series
     join_n = np.array([join_n[0]]*(pattern_length//2) + list(join_n) + [join_n[-1]]*(pattern_length//2))
     return join_n, all_join
 
-def backward_anomaly(ts, pattern_length, nm_subseq, normalize):
-    score = []
-    for i in range(len(ts)-pattern_length):
-        tmp_x = ts[i:i+pattern_length]
-        tmp_x_n = norm_seq(tmp_x, normalize)
-        score.append(np.linalg.norm(compute_diff_dist(nm_subseq, tmp_x_n)))
-    return np.array(score)
+# def backward_anomaly(ts, pattern_length, nm_subseq, normalize):
+    # score = []
+    # for i in range(len(ts)-pattern_length):
+        # tmp_x = ts[i:i+pattern_length]
+        # tmp_x_n = norm_seq(tmp_x, normalize)
+        # score.append(np.linalg.norm(compute_diff_dist(nm_subseq, tmp_x_n)))
+    # return np.array(score)
 
 def backward_anomaly2(ts, pattern_length, nm_subseq, normalize, device_id=0):
     score = []
