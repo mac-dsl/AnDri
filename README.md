@@ -25,10 +25,10 @@ When a new linkage distance is less than prev. linkage distance, we called it re
 
 
 ## References
-- Will be apeared
+- TBA
 
 ## Contributors
-- Will be apeared
+- Jongjun Park
 
 ## Installation
 
