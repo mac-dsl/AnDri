@@ -3,6 +3,8 @@
 
 This repository contains the implementation of **AnDri**, a time-series anomaly detection framework that jointly detects anomalies and adapts to evolving normal patterns through drift-aware normal pattern management.
 
+[overview.pdf](https://github.com/user-attachments/files/28907440/overview.pdf)
+
 Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, anomaly detection method cognizant of concept drift. AnDri co-detects anomalies and drift, extending the types of drift considered in anomaly detection to include gradual and recurring drifts.
 - AnDri supports a dyanamic normal model where normal patterns are not fixed, but can be activated, deactivated or added over time. This adaptability enables AnDri to compute anomaly scores to the most similar active pattern.
 - We introduce a new time-series clustering method, Adajcent Hierarchical Clustering (AHC), for learning normal patterns that respect their temporal locality; critical for detecting short-lived normal patterns that are overlooked by existing methods.
@@ -10,9 +12,7 @@ Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, 
 ## Repository Structure
 
 ```text
-
 .
-
 ├── data/                  # Processed datasets
 ├── results/               # Output directory
 ├── sample.ipynb           # Example notebook
@@ -32,15 +32,16 @@ Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, 
 ├── environment.yml
 ├── requirements.txt
 └── README.md
-
 ```
-
 
 ## References of this repository
 - https://github.com/TheDatumOrg/TSB-UAD
 - https://github.com/imperial-qore/TranAD
 - https://moa.cms.waikato.ac.nz
-- https://github.com/mac-dsl/CanGene (To inject drifts)
+- https://github.com/szamani20/time-series
+- https://github.com/kaist-dmlab/ARCUS
+- https://github.com/exathlonbenchmark/divad
+- https://github.com/NetManAIOps/OmniAnomaly
 
 
 ## References
@@ -84,6 +85,13 @@ data/
     ├── real iot/
     └── SWaT/
 ```
+## Original Data Sources
+- SMD: https://github.com/NetManAIOps/OmniAnomaly
+- Canadian Climate data: https://climate-change.canada.ca/climate-data/#/hourly-climate-data
+    - Canadian Normal Climate: https://climate.weather.gc.ca/climate_normals/index_e.html
+- California Traffic data (PeMS): https://pems.dot.ca.gov (need to login)
+- SWaT: https://itrust.sutd.edu.sg/itrust-labs_datasets (July 2019)
+- Sensor: https://github.com/kimhungGCZ/anomaly_dataset (real iot)
 
 If using your own datasets, update the corresponding paths in the notebook or scripts.
 
