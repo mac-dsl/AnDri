@@ -7,15 +7,57 @@ Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, 
 - AnDri supports a dyanamic normal model where normal patterns are not fixed, but can be activated, deactivated or added over time. This adaptability enables AnDri to compute anomaly scores to the most similar active pattern.
 - We introduce a new time-series clustering method, Adajcent Hierarchical Clustering (AHC), for learning normal patterns that respect their temporal locality; critical for detecting short-lived normal patterns that are overlooked by existing methods.
 
-# Example of AHC
-![Image](https://github.com/user-attachments/assets/4b7de77d-fbfd-4d74-bd70-5e5b1c103beb)
-For this example, there are two normal patterns (ECG 803, ECG 805) are repeatedly appeared, with different frequency. First, we divided it into the length of normal pattern (i.e., 2xl), and compare similarities between them for only adjacent subsequences (i.e., left and right)
+## Repository Structure
 
-![Image](https://github.com/user-attachments/assets/1dea8303-9686-4d99-afc4-f11942c2a6cc)
-After that, AHC merges sub-clusters using WARD-linkage distance, in an aggremerative hierarchical manner. 
+```text
 
-![Image](https://github.com/user-attachments/assets/409deb2c-2fcb-4eec-baf8-1083323fa2eb)
-When a new linkage distance is less than prev. linkage distance, we called it reversion, AHC rolls back the previous merge, and revise the merge, even if those are not adjacent each other. 
+.
+
+├── data/                  # Processed datasets
+
+├── results/               # Output directory
+
+├── sample.ipynb           # Example notebook
+
+├── test_andri.py          # Example script
+
+├── util/
+
+│   ├── ahc.py
+
+│   ├── analy.py
+
+│   ├── plot_andri.py
+
+│   ├── util_andri.py
+
+│   ├── util_data.py
+
+│   ├── util_exp.py
+
+│   └── TSB_AD/
+
+│       ├── metrics.py
+
+│       ├── slidingWindows.py
+
+│       └── models/
+
+│           ├── andri.py
+
+│           ├── norma.py
+
+│           ├── sand.py
+
+│           └── error_detection.py
+
+├── environment.yml
+
+├── requirements.txt
+
+└── README.md
+
+```
 
 
 ## References of this repository
