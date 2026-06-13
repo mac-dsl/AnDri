@@ -1,14 +1,21 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import distance
-from util.util_andri import intra_cluster_dist, compute_diff_dist, longest_consecutive_sequence
+from tslearn.barycenters import dtw_barycenter_averaging, dtw_barycenter_averaging_petitjean
+from util.util_andri import longest_consecutive_sequence, compute_seq_dist, intra_cluster_dist_stat
+
 import copy
 import math
+import time
 
 MAX_DIST = 100000
 
+from collections import defaultdict
+elap_times = defaultdict(list)
+
 #  @params seqAs, seqBs: target subseqeuences (in each cluster) to compute distance
 #  @params: linkage_method: linkage method = {'average', 'complete', 'single', 'centroid', 'ward}
-def __compute_dist_cls(seqAs, seqBs, linkage_method='average'):
+def __compute_dist_cls(seqAs, seqBs, linkage_method='average', metric = 'euclidean'):
     """
     Compute linkage between clusters
     """
@@ -16,26 +23,38 @@ def __compute_dist_cls(seqAs, seqBs, linkage_method='average'):
         d_AB = []
         for seqA in seqAs:
             for seqB in seqBs:
-                d_AB.append(np.linalg.norm(compute_diff_dist(np.array(seqA), np.array(seqB))))
+                # d_AB.append(np.linalg.norm(compute_diff_dist(np.array(seqA), np.array(seqB))))
+                d_AB.append(compute_seq_dist(np.array(seqA), np.array(seqB), metric=metric))
         if linkage_method =='average': d_res = np.mean(d_AB)
         elif linkage_method == 'complete': d_res = np.max(d_AB)
         elif linkage_method == 'single': d_res = np.min(d_AB)
-    elif linkage_method == 'centroid': d_res = np.linalg.norm(compute_diff_dist(np.mean(seqAs, axis=0), np.mean(seqBs, axis=0)))
+    # elif linkage_method == 'centroid': d_res = np.linalg.norm(compute_diff_dist(np.mean(seqAs, axis=0), np.mean(seqBs, axis=0)))
+    elif linkage_method == 'centroid': d_res = compute_seq_dist(np.mean(seqAs, axis=0), np.mean(seqBs, axis=0), metric=metric)
     elif linkage_method == 'ward':
-        m_A = np.mean(seqAs, axis=0)
-        m_B = np.mean(seqBs, axis=0)
-        d_res = np.linalg.norm(m_A-m_B)**2 * (len(seqAs)*len(seqBs)/(len(seqAs)+len(seqBs)))
+        if metric == 'euclidean' or metric == 'z-norm' or metric == 'z-norm_rev' or metric == 'zero-mean':
+            m_A = np.mean(seqAs, axis=0)
+            m_B = np.mean(seqBs, axis=0)
+        elif metric == 'dtw' or metric == 'fastDTW' or metric == 'sbd':
+            m_A = dtw_barycenter_averaging(seqAs).squeeze()
+            m_B = dtw_barycenter_averaging(seqBs).squeeze()
+        else:
+            print(f'Not supported metric: {metric}')
+            return None
+        # d_res = np.linalg.norm(m_A-m_B)**2 * (len(seqAs)*len(seqBs)/(len(seqAs)+len(seqBs)))
+        
+        d_res = compute_seq_dist(m_A, m_B, metric=metric)**2 * (len(seqAs)*len(seqBs)/(len(seqAs)+len(seqBs)))
     else:
         print('Linkage:', linkage_method, 'is not provided.')
         return None
     return d_res
 
-#  @params seqs: list of subsequences
-#  @params linkage method: {'average', 'complete', 'single', 'centroid', 'ward}
-def __adj_dist(seqs, linkage_method):
+
+def __adj_dist(seqs, linkage_method, metric='euclidean'):
     d_vec = []
     for i in range(len(seqs)-1):
-        d_vec = np.append(d_vec, __compute_dist_cls([seqs[i]], [seqs[i+1]], linkage_method=linkage_method))
+        # d_vec = np.append(d_vec, __compute_dist_cls([seqs[i]], [seqs[i+1]], linkage_method=linkage_method))
+        d_vec = np.append(d_vec, compute_seq_dist(seqs[i], seqs[i+1], metric=metric))
+
     return d_vec
 
 #  @params d_mat: pairwise distance matrix (n-by-n)
@@ -61,12 +80,17 @@ def __find_min(d_mat, kadj, cl_s):
             tid1 = int(ind/kadj)
             tid2 = ind - tid1*kadj
             left, right = tid1, tid1+tid2+1
+            # print("inside:", len(d_mat), 'ind:', ind, 'k:', kadj, 'tids:', tid1, tid2)
         else:
             ind, min_d = np.argmin(d_mat), np.min(d_mat)
             tid1 = int(ind/len(d_mat))
             tid2 = ind - tid1*len(d_mat)
-            if tid1 < tid2: left, right = tid1, tid2
-            else: left, right = tid2, tid1
+            print("inside2:", len(d_mat), 'ind:', ind, 'k:', kadj, 'tids:', tid1, tid2)
+            if tid1 <= tid2: 
+                left, right = tid1, tid2
+            else: 
+                left, right = tid2, tid1
+            if left == right: right +=1
 
     return left, right, min_d
 
@@ -74,7 +98,7 @@ def __find_min(d_mat, kadj, cl_s):
 #  @params cl_s: Clusters containing members' indices
 #  @params d_mat: triangular distance matrix
 #  @params seqs: subsequences in the training
-def __merge_cls(left, right, cl_s, d_mat, seqs, kadj, linkage_method ='average'):
+def __merge_cls(left, right, cl_s, d_mat, seqs, kadj, linkage_method ='average', metric='euclidean'):
     """
     Update distance matrix d_mat, merge clusters
     """
@@ -82,23 +106,12 @@ def __merge_cls(left, right, cl_s, d_mat, seqs, kadj, linkage_method ='average')
     cluster_new = copy.deepcopy(cl_s)
     cluster_new[left] += cluster_new[right]
 
-    if kadj==1:
-        for i in range(len(d_mat)):
-            if i !=left and i!= right and (__min_dist_cl(cluster_new[left], cluster_new[i])) == 1:
-                d_mat[left, i] = d_mat[i, left] = __compute_dist_cls([seqs[cl] for cl in cluster_new[left]], [seqs[cl] for cl in cluster_new[i]], linkage_method)
-
-        del cluster_new[right]
-        d_mat = np.delete(d_mat, right, axis=0)
-        d_mat = np.delete(d_mat, right, axis=1)
-
-    else:
-        for i in range(len(d_mat)):
-            if i !=left and i != right:
-                d_mat[left,i] = d_mat[i,left] = __compute_dist_cls([seqs[cl] for cl in cluster_new[left]], [seqs[cl] for cl in cluster_new[i]], linkage_method)
-        
-        del cluster_new[right]
-        d_mat = np.delete(d_mat, right, axis=0)
-        d_mat = np.delete(d_mat, right, axis=1)
+    for i in range(len(d_mat)):
+        if i !=left and i!= right and (__min_dist_cl(cluster_new[left], cluster_new[i])) <= kadj:
+            d_mat[left, i] = d_mat[i, left] = __compute_dist_cls([seqs[cl] for cl in cluster_new[left]], [seqs[cl] for cl in cluster_new[i]], linkage_method, metric)
+    del cluster_new[right]
+    d_mat = np.delete(d_mat, right, axis=0)
+    d_mat = np.delete(d_mat, right, axis=1)
 
     return cluster_new, d_mat
 
@@ -108,11 +121,14 @@ def __get_sub_lr(hist_cluster, target):
     """
     Split target cluster (roll-back to target status) and return left and right
     """
-    if len(target) ==2:
+    if len(target) <=2:
         return [target[0]], [target[1]]
     f_idx = [i for i, part_l in enumerate(hist_cluster) if set(part_l).intersection(set(target)) == set(part_l)]
     c2 = hist_cluster[f_idx[-2]]
     c1 = [x for x in target if x not in c2]
+
+    if len(c1) ==0 or len(c2) == 0:
+        return None, None
     
     if np.min(c1) < np.min(c2):
         left, right = c1, c2
@@ -151,6 +167,48 @@ def __min_dist_cl(cl_a, cl_b):
 
     return min_ab
 
+def __check_delta_max(seqs, cl_a, cl_b, delta_max, th_dist, metric):
+    """
+    Check the pair of subsequences in two clusters, those satisfy
+    (1) time distance is less than delta_max
+    (2) dissimilarity between them is less than th_dist 
+    """
+    if th_dist == 0:
+        dist_a, dist_b = [], []
+        for i in range(len(cl_a)-1):
+            for j in range(i, len(cl_a)):
+                dist_a.append(compute_seq_dist(seqs[cl_a[i]], seqs[cl_a[j]], metric=metric))
+        for i in range(len(cl_b)-1):
+            for j in range(i, len(cl_b)):
+                dist_b.append(compute_seq_dist(seqs[cl_b[i]], seqs[cl_b[j]], metric=metric))
+
+        a_mean = np.mean(dist_a) if len(dist_a) >0 else np.nan
+        b_mean = np.mean(dist_b) if len(dist_b) >0 else np.nan
+        th_dist = np.nanmin([a_mean, b_mean])
+        # th_dist = min(np.mean(dist_a), np.mean(dist_b))
+    
+    ## Sort cl_a and cl_b
+    sort_a, sort_b = np.sort(cl_a), np.sort(cl_b)
+    if np.mean(sort_a) < np.mean(sort_b):
+        cl_left, cl_right = sort_a, sort_b
+    else:
+        cl_left, cl_right = sort_b, sort_a
+
+    idx_l = np.argsort(cl_left)
+    idx_r = np.argsort(cl_right)
+
+    for i in idx_l[::-1]:
+        if abs(cl_left[i] -cl_right[idx_r[0]]) > delta_max: break
+        for j in idx_r:
+            if abs(cl_left[i]-cl_right[j]) > delta_max:
+                break
+            dist_ij = compute_seq_dist(seqs[cl_left[i]], seqs[cl_right[j]], metric=metric)
+            if dist_ij < th_dist:
+                # print(f'Check delta max: dist {dist_ij} < {th_dist}, time diff {abs(cl_left[i]-cl_right[j])} < {delta_max}, Left: {cl_left[i]} vs. Right: {cl_right[j]}')
+                return True
+    
+    return False
+
 #  @params seqs: divided sequences
 #  @params left, right: selected idx of clusters for merging
 #  @params c1, c2: Z-idx of merging 
@@ -163,13 +221,12 @@ def __min_dist_cl(cl_a, cl_b):
 #  @params num_seq: num_seq at the start of clustering (to chk Z idx)
 #  @params th_reverse: % of difference to check flip
 #  @params kadj: k-adjacent distance to allow merging
-def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters, add_pair, num_seq, th_reverse, kadj, linkage_method):
+def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters, add_pair, num_seq, th_reverse, kadj, delta_max, linkage_method, metric):
     """
     Do (cascade) flipped merge process (using simple ward and reduce cascade flip)
     """
+    flip_cnt = 0
     while (d_c1-c3 > d_c1*th_reverse/100 or d_c2-c3> d_c2*th_reverse/100):
-        t_dist_org = __min_dist_cl(clusters[left], clusters[right])
-        if kadj >1 and t_dist_org > kadj: break
 
         ## Find later merged cluster and break it 
         if d_c1 > d_c2: res, brk_Z_idx, res_idx, brk_idx = c2, c1, right, left
@@ -177,12 +234,17 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
         
         prev_Z_idx = brk_Z_idx-num_seq
 
-        res_cls = clusters[res_idx].copy()  ## remained cluster        
+        res_cls = clusters[res_idx].copy()  ## remained cluster   
+        # print('ORG:', clusters, 'LR:', left, right)     
+        # print('BRK:', clusters[brk_idx], brk_idx)
+        # print('RES:', clusters[res_idx], res_idx)
         brk_l_cls, brk_r_cls = __get_sub_lr(add_pair, add_pair[prev_Z_idx]) ## divide break_cluster
+        if brk_l_cls is None:
+            break
 
         ## Compute distances from remain-to-divided clusters
-        d_res_L =__compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_l_cls], linkage_method)
-        d_res_R =__compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_r_cls], linkage_method)
+        d_res_L =__compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_l_cls], linkage_method, metric=metric)
+        d_res_R =__compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_r_cls], linkage_method, metric=metric)
 
         if np.min([d_res_L, d_res_R]) > c3 or np.mean(np.array(Z)[:,2]) > c3: break     ## prevent cascade flip 
 
@@ -194,9 +256,10 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
             brk_cls = brk_l_cls if brk_Z_idx == Z[prev_Z_idx][0] else brk_r_cls
             d_brk = Z[brk_Z_idx-num_seq][2] if brk_Z_idx > num_seq else -1
         
-        t_dist = __min_dist_cl(res_cls, brk_cls)    ## find the shorter distance
 
-        if t_dist <= t_dist_org: break      ## prevent cascade flip 
+        ### Stop rollback conditions
+        if __check_delta_max(seqs, res_cls, brk_cls, delta_max, 0, metric) == False: 
+            break
 
         ## Revise clusters & d_mat
         del clusters[brk_idx]   ## delete the cluster to break
@@ -207,7 +270,7 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
             ## Add brk_L
             d_all_L, d_all_R = np.array([]), np.array([])
             for cl in clusters:
-                d_add = __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_l_cls], linkage_method) if (__min_dist_cl(cl, brk_l_cls)) == 1 else MAX_DIST
+                d_add = __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_l_cls], linkage_method, metric=metric) if (__min_dist_cl(cl, brk_l_cls)) == 1 else MAX_DIST
                 d_all_L = np.append(d_all_L, d_add)
             d_mat = np.insert(d_mat, brk_idx, d_all_L, axis=0)
             d_all_L = np.insert(d_all_L, brk_idx, MAX_DIST)
@@ -216,7 +279,7 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
 
             ## Add brk_R
             for cl in clusters:
-                d_add = __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_r_cls], linkage_method) if (__min_dist_cl(cl, brk_r_cls)) == 1 else MAX_DIST
+                d_add = __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_r_cls], linkage_method, metric=metric) if (__min_dist_cl(cl, brk_r_cls)) == 1 else MAX_DIST
                 d_all_R = np.append(d_all_R, d_add)
             d_mat = np.insert(d_mat, brk_idx+1, d_all_R, axis=0)
             d_all_R = np.insert(d_all_R, brk_idx+1, MAX_DIST)
@@ -230,7 +293,7 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
             ## Add brk_L
             d_all_L, d_all_R = np.array([]), np.array([])
             for cl in clusters:
-                d_all_L = np.append(d_all_L, __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_l_cls], linkage_method))
+                d_all_L = np.append(d_all_L, __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_l_cls], linkage_method, metric=metric))
             d_mat = np.insert(d_mat, brk_idx, d_all_L, axis=0)
             d_all_L = np.insert(d_all_L, brk_idx, MAX_DIST)
             d_mat = np.insert(d_mat, brk_idx, d_all_L, axis=1)
@@ -238,7 +301,7 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
 
             ## Add brk_R
             for cl in clusters:
-                d_all_R = np.append(d_all_R, __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_r_cls], linkage_method))
+                d_all_R = np.append(d_all_R, __compute_dist_cls([seqs[id] for id in cl], [seqs[id] for id in brk_r_cls], linkage_method, metric=metric))
             d_mat = np.insert(d_mat, brk_idx+1, d_all_R, axis=0)
             d_all_R = np.insert(d_all_R, brk_idx+1, MAX_DIST)
             d_mat = np.insert(d_mat, brk_idx+1, d_all_R, axis=1)                
@@ -253,19 +316,22 @@ def flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters,
 
         if brk_Z_idx >= len(Z)+num_seq: brk_Z_idx -=1
         
-        if res_idx == right: left, right, c1, d_c1 = clusters.index(brk_cls), clusters.index(res_cls), brk_Z_idx, d_brk
-        else: right, left, c2, d_c2 = clusters.index(brk_cls), clusters.index(res_cls), brk_Z_idx, d_brk
+        if res_idx == right: 
+            left, right, c1, d_c1 = clusters.index(brk_cls), clusters.index(res_cls), brk_Z_idx, d_brk
+        else: 
+            right, left, c2, d_c2 = clusters.index(brk_cls), clusters.index(res_cls), brk_Z_idx, d_brk
 
         if left > right: left, right, c1, c2, d_c1, d_c2 = right, left, c2, c1, d_c2, d_c1  ## refine for cascade-flip
         
         if c1 >= prev_Z_idx+num_seq: c1 -=1
         if c2 >= prev_Z_idx+num_seq: c2 -=1
 
-        c3, c4 = __compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_cls], linkage_method), len(res_cls) + len(brk_cls)
+        c3, c4 = __compute_dist_cls([seqs[id] for id in res_cls], [seqs[id] for id in brk_cls], linkage_method, metric=metric), len(res_cls) + len(brk_cls)
+        flip_cnt +=1
         
     add_idx = len(d_mat)+1 if kadj ==1 else len(d_mat)
 
-    return left, right, c1, c2, c3, add_idx, d_mat, clusters, Z, add_pair
+    return left, right, c1, c2, c3, add_idx, d_mat, clusters, Z, add_pair, flip_cnt
 
 
 #  @params sel_idx: selected idx of the subsequence (to find the hierarchical tree)
@@ -311,7 +377,7 @@ def __get_cont_cl(arr, gap, min_len):
     valid_is = np.where(lengths > min_len)[0]
     return [(start_i[i], end_i[i]) for i in valid_is]
 
-def __rev_side_cl(cl, outlier, d_seq_m, all_cl, seqs, l2):
+def __rev_side_cl(cl, outlier, d_seq_m, all_cl, seqs, l2, metric='euclidean'):
     out_t = copy.deepcopy(outlier)
     cl_tmp = copy.deepcopy(cl)
     while (out_t[0] == cl_tmp[0]):
@@ -325,7 +391,8 @@ def __rev_side_cl(cl, outlier, d_seq_m, all_cl, seqs, l2):
                     break
             if l_m_subseq is None: break
             
-            if np.linalg.norm(compute_diff_dist(l_m_subseq, seqs[out_t[0]])) < d_seq_m[0]:
+            # if np.linalg.norm(compute_diff_dist(l_m_subseq, seqs[out_t[0]])) < d_seq_m[0]:
+            if compute_seq_dist(l_m_subseq, seqs[out_t[0]], metric=metric) < d_seq_m[0]:
                 cl_t.append(out_t[0])
                 l2[out_t[0]] = l2[out_t[0]-1]
                 del cl_tmp[0]
@@ -345,7 +412,8 @@ def __rev_side_cl(cl, outlier, d_seq_m, all_cl, seqs, l2):
                     r_m_subseq = np.mean([seqs[c] for c in cl_t], axis=0)
                     break
             if r_m_subseq is None: break
-            if np.linalg.norm(compute_diff_dist(r_m_subseq, seqs[out_t[-1]])) < d_seq_m[-1]:
+            # if np.linalg.norm(compute_diff_dist(r_m_subseq, seqs[out_t[-1]])) < d_seq_m[-1]:
+            if compute_seq_dist(r_m_subseq, seqs[out_t[-1]], metric=metric) < d_seq_m[-1]:
                 cl_t.append(out_t[-1])
                 # print(f'Right: {out_t[-1]} {l2[out_t[-1]]} --> {out_t[-1]+1} {l2[out_t[-1]+1]}')
                 l2[out_t[-1]] = l2[out_t[-1]+1]
@@ -366,61 +434,11 @@ def __rev_side_cl(cl, outlier, d_seq_m, all_cl, seqs, l2):
         return None
     
 
-def __refine_clusters(cl_new, seqs, gap, max_W, l2):
-    ## Refine clusters
-    # d_mats, d_intras, cl_outliers = [], [], []
-    cl_refine = []
-    l_new = copy.deepcopy(l2)
-    cl_num = len(cl_new)
-
-    for cl in cl_new:
-        cl_subseqs = []
-        for c in cl: cl_subseqs.append(seqs[c])
-        m_subseq = np.mean(cl_subseqs, axis=0)
-
-        d_seq_m = [np.linalg.norm(compute_diff_dist(seq, m_subseq)) for seq in cl_subseqs]
-        cl_out = [cl[i] for i, d_m in enumerate(d_seq_m) if d_m > np.mean(d_seq_m)+np.std(d_seq_m)]
-
-        ## Find 'continuous' outliers for checking division of subcluster
-        cont_cl = np.array(cl_out[1:]) - np.array(cl_out[:-1])
-        range_se = __get_cont_cl(cont_cl, gap, max_W)
-
-        if len(range_se) == 0:
-            cl_refine.append(cl)
-            continue
-        
-        cl_remain = copy.deepcopy(cl)
-        for (s, e) in range_se:
-            s, e = cl_out[s], cl_out[e+1]
-
-            ## Possible sub-clusters should have length longer than 70% of the minimum cluster or a quarter of itself
-            if (e-s+1) >= max_W and (e-s+1) >gap:
-                tmp_cl = [seqs[c] for c in np.arange(s-1, e+1)]    ## add +- 1 subseqs
-                d_adj = [np.linalg.norm(compute_diff_dist(tmp_cl[i], tmp_cl[i+1])) for i in range(len(tmp_cl)-1)]
-                d_adj_cl = [np.linalg.norm(compute_diff_dist(seqs[cl[i]], seqs[cl[i+1]])) for i in range(len(cl)-1)]
-                id_refine = [i for i, d_a in enumerate(d_adj) if d_a < np.mean(d_adj_cl) + np.std(d_adj_cl)]
-                
-                if len(id_refine) >= len(d_adj)*0.7:
-                    s = s-1+id_refine[0]
-                    e = s+id_refine[-1]+1
-                    if e >= len(seqs): e = len(seqs)-1
-                    cl_refine.append(np.arange(s, e))
-
-                    cl_num+=1
-                    for c in cl_refine[-1]: l_new[c] = cl_num
-                    cl_remain = [c for c in cl_remain if c not in np.arange(s, e)]
-
-        if len(cl_remain) > 0:
-            __rev_side_cl(cl_remain, cl_out, d_seq_m, cl_new, seqs, l2)
-            cl_refine.append(cl_remain)
-
-    return cl_refine, l_new
-
 #  @params Z: matrix Z of hierarchical clustering 
 #  @params add_pair: history of added clusters for each step
 #  @params num_seq: num_seq at the start of clustering (to chk Z idx)
 #  @params t_seqs: all subsequences 
-def __cut_subtree(num_seq, Z, add_pair, t_seqs, isTrain, gap, max_W):
+def __cut_subtree(num_seq, Z, add_pair, t_seqs, isTrain, gap, max_W, metric='euclidean'):
     """
     Multiple-cut of Z (dendrogram)
     """
@@ -436,18 +454,34 @@ def __cut_subtree(num_seq, Z, add_pair, t_seqs, isTrain, gap, max_W):
         if l2[sel_idx] != -1: continue
 
         Z_part, cl_part, idx_z = __get_upper_cl(sel_idx, num_seq, Z, add_pair)
+        ## Check the cl_part[0] for previously assigned clusters
+        if any(ck != -1 for ck in [l2[k] for k in cl_part[0]]): 
+            continue
+        
         diff_part_z = abs(Z_part[1:, 2] - Z_part[:-1,2])
-        th_diff = np.mean(diff_part_z)
+        th_diff = np.mean(diff_part_z[:-1])
         
         chk_dist.append(diff_part_z)
         part_z.append(Z_part[:,2])
         for i in range(1, len(diff_part_z)):                
             if diff_part_z[i] > th_diff:
-                ## Cut sub-tree here
-                cl_tmp = copy.deepcopy(cl_part[i])
-                for c in cl_part[i]:
-                    if l2[int(c)] != -1: cl_tmp.remove(c)
-                    else: l2[int(c)] = len(cl_new)+1
+
+                for j in range(i-1, -1, -1):
+                    ## Cut sub-tree here
+                    cl_tmp = copy.deepcopy(cl_part[j])
+                    cl_tmp.sort()
+                    prev_cls = list(set([l2[c] for c in cl_tmp if l2[c] != -1]))
+                    if len(prev_cls) == 0:
+                        for c in cl_part[j]:
+                            l2[int(c)] = len(cl_new)+1
+                        break
+                    else:
+                        continue
+                    
+                print('Diff:', th_diff)
+                # for c in cl_part[i-1]:
+                    # if l2[int(c)] != -1: cl_tmp.remove(c)
+                    # else: l2[int(c)] = len(cl_new)+1
 
                 cl_new.append(cl_tmp)
 
@@ -456,22 +490,19 @@ def __cut_subtree(num_seq, Z, add_pair, t_seqs, isTrain, gap, max_W):
                 all_dist_Z.append(Z_part[:,2][i])
                 break
 
-    ## Refine clusters
-    if isTrain:
-        cl_refine, l_new = __refine_clusters(cl_new, t_seqs, gap, max_W/2, l2)
-        return l_new, cl_refine
-    else:
-        return l2, cl_new
+    return l2, cl_new
 
 #  @params seq: subsequence to test
 #  @params m_subseq: normal pattern to compare
 #  @params m_tau: tau threshold for the m_subseq
 #  @params eta: exponential parameter eta
-def membership(seq, m_subseq, m_tau, eta):
+def membership(seq, m_subseq, m_tau, eta, metric='euclidean'):
     """
     Compute the membership of given seq for the m_subseq pattern
     """
-    d = np.linalg.norm(compute_diff_dist(seq, m_subseq))
+    # d = np.linalg.norm(compute_diff_dist(seq, m_subseq))
+    # print(len(seq), len(m_subseq))
+    d = compute_seq_dist(seq, m_subseq, metric=metric)
     if  d<= m_tau:
         return 1, d
     else:
@@ -512,13 +543,13 @@ def __range_Sw(cl_id, Sw, listcluster, isTrain):
 #  @params m_subseq: normal pattern to compare
 #  @params m_tau: tau threshold for the m_subseq
 #  @params eta: exponential parameter eta
-def __find_freq_th(seq_n, Sw, m_subseq, m_tau, eta):
+def __find_freq_th(seq_n, Sw, m_subseq, m_tau, eta, metric='euclidean'):
     """
     Compute the minimum membership (nu) 
     """
     mem_t = []
     for seq in seq_n:
-        mem_t.append(membership(seq, m_subseq, m_tau, eta)[0])
+        mem_t.append(membership(seq, m_subseq, m_tau, eta, metric)[0])
     avg_mem = []
     for i in range(len(seq_n)-Sw+1):
         avg_mem.append(np.mean(mem_t[i:i+Sw]))
@@ -549,38 +580,63 @@ def __get_freq_th(seqs, Sw, cl_ids, listcluster_rev, m_subseq, m_tau, eta, max_n
 #  @params kadj: k-adjacent distance to compare
 #  @params eta: exponential parameter eta
 #  @params max_W: maximum W size to allow
-def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W = 20, max_nu=0.9, min_size=0.025, isTrain=True, NMs =None):
+def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W = 20, delta_max=20, max_nu=0.9, min_size=0.025, isTrain=True, NMs =None, rollback=True, metric='euclidean', plot_nm=False):
     """
     Adjacent linkage computing function
     """
+    global elap_times
+    elap_times = defaultdict(list)
+
     ## (1) Compute the linkage first
     clusters = [[i] for i in range(len(seqs))]  ## init.    
     Z, add_pair = [], []
     num_seq = len(seqs)
 
     # Compute all pairwise distances: Init.
+    start = time.perf_counter()
     if kadj ==1:
-        d_vec = __adj_dist(seqs, linkage_method)
+        d_vec = __adj_dist(seqs, linkage_method=linkage_method, metric=metric)
         d_mat = np.ones((num_seq, num_seq))*MAX_DIST
+        # print(f'LEN (seq): {num_seq} {len(seqs)}, LEN (vec): {len(d_vec)}, LEN (mat): {len(d_mat)}')
         for i, d in enumerate(d_vec):
             d_mat[i, i+1] = d_mat[i+1, i] = d
     else:
-        d_mat = distance.squareform(distance.pdist(seqs))
+        # d_mat = distance.squareform(distance.pdist(seqs_n))
+        d_mat = np.ones((num_seq, num_seq))*MAX_DIST
+        for i in range(len(d_mat)-1):
+            for j in range(i+1, min(i+kadj+1, num_seq)):
+                d_mat[i,j] = d_mat[j,i] = compute_seq_dist(seqs[i], seqs[j], metric=metric)
         for i in range(len(d_mat)): d_mat[i,i] = MAX_DIST ## for init. (inf. diagonal)
 
+    end_init = time.perf_counter()
+    elap_times['init_dist'].append(end_init - start)
+
     add_idx = len(d_mat)   ## for Z, index init
+    
+    num_flip = 0
+    count_flip = 0
+    flips = []
 
     ## Merge until all
     while len(clusters) >1:
+
         ## Find two clusters are placed within a certain (k-adjacent) range
         left, right, c3 = __find_min(d_mat, kadj, clusters)
         c1, c2, d_c1, d_c2 = __get_index_Z(Z, add_pair, clusters, left, right, num_seq)
 
         ## Cascade flip-merge TODO: Reduce args
-        if d_c1-c3 > d_c1*th_reverse/100 or d_c2-c3> d_c2*th_reverse/100:
+        # if d_c1-c3 > d_c1*th_reverse/100 or d_c2-c3> d_c2*th_reverse/100:
+        if rollback and (d_c1 > c3 or d_c2 > c3):
             
-            if __min_dist_cl(clusters[left], clusters[right]) < max(kadj, max_W):
-                left, right, c1, c2, c3, add_idx, d_mat, clusters, Z, add_pair = flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters, add_pair, num_seq, th_reverse, kadj, linkage_method)
+            # if __min_dist_cl(clusters[left], clusters[right]) < max(kadj, max_W):
+            # if __check_delta_max(seqs, clusters[left], clusters[right], delta_max, 0, metric) == False:
+            # print(f'Flipped merge activated. [left] index: {left}, #subseq: {len(clusters[left])}, mem(left): {max(clusters[left])}, mem: {clusters[left]}!!!!  [right] index: {right}, #subseq: {len(clusters[right])}, mem(right): {min(clusters[right])}, mem {clusters[right]}')
+            rollback_start = time.perf_counter()
+            left, right, c1, c2, c3, add_idx, d_mat, clusters, Z, add_pair, flip_cnt = flipped_merge(seqs, left, right, c1, c2, c3, d_c1, d_c2, Z, d_mat, clusters, add_pair, num_seq, th_reverse, kadj, delta_max, linkage_method, metric=metric)
+            elap_times['rollback'].append(time.perf_counter() - rollback_start)
+            num_flip += flip_cnt
+            count_flip += 1
+            flips.append(flip_cnt)
 
         c4 = len(clusters[left]) + len(clusters[right])
         Z.append([int(c1), int(c2), c3, c4])
@@ -588,18 +644,29 @@ def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W
         np.set_printoptions(precision=2)
 
         ## Update dist matrix, lrs, and clusters
-        clusters, d_mat = __merge_cls(left, right, clusters, d_mat, seqs, kadj, linkage_method=linkage_method)
+        clusters, d_mat = __merge_cls(left, right, clusters, d_mat, seqs, kadj, linkage_method=linkage_method, metric=metric)
         new_cl = copy.deepcopy(clusters[left])
         add_pair.append(new_cl)
         add_idx +=1
+        # print(left, right, len(clusters))
 
+    
     Z = np.array(Z)
+    # print(Z)
     if len(Z) <=1:
-        return None, None, None, None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
     gap = kadj if kadj !=1 else 2
-    listcluster, _ = __cut_subtree(len(seqs), Z, add_pair, seqs, isTrain, gap, max_W)
+    # plt.figure()
+    # plt.plot(Z[:,2])
+    # plt.show()
+    listcluster, cl_ref = __cut_subtree(len(seqs), Z, add_pair, seqs, isTrain, gap, max_W, metric=metric)
+    
+    nm_start = time.perf_counter()
+    # elap_times['ahc_init'].append(nm_start - start)
 
+    # print("cut tree:", listcluster)
+    # print(cl_ref)
     cl_lengths = []
     for i in range(1, int(np.max(listcluster))+1):
         cl_lengths.append(len([j for j, l in enumerate(listcluster) if l==i]))
@@ -608,33 +675,60 @@ def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W
     m_subseq, single_subseq, d_subseq = [], [], []
     cl_ids, nums = [], []
     Ws, m_tau, m_nu = [], [], []
+    min_cl_size = np.sum(cl_lengths)*min_size if isTrain else np.sum(cl_lengths)*np.mean([nm_t.nu for nm_t in NMs]) 
 
     listcluster_rev = copy.deepcopy(listcluster)
     for i in range(1, int(np.max(listcluster))+1):
         inds = [j for j, l in enumerate(listcluster) if l==i]
         cl_is = [seqs[j] for j in inds]
         
-        min_cl_size = np.sum(cl_lengths)*min_size if isTrain else np.sum(cl_lengths)*np.mean([nm_t.nu for nm_t in NMs]) 
+        
         ## Check th_size_nm here
         if len(cl_is) >= int(min_cl_size) and len(cl_is)*(max_nu) >1:
-            tmp_m = np.mean(cl_is, axis=0)
-            tmp_dist = [np.linalg.norm(compute_diff_dist(tmp_m, np.array(t_subseq))) for t_subseq in cl_is]
-            
+            # print('Cluster ID:', i, 'Size:', len(cl_is), min_cl_size)
+            if metric == 'euclidean' or metric == 'z-norm' or metric == 'z-norm_rev' or metric == 'zero-mean':
+                tmp_m = np.mean(cl_is, axis=0)
+            elif metric == 'dtw' or metric == 'fastDTW' or metric == 'sbd':
+                tmp_m = dtw_barycenter_averaging(cl_is)
+                tmp_m = tmp_m.squeeze()
+            else:
+                KeyError(f'Not supported metric: {metric}')
+                break
+            # tmp_dist = [np.linalg.norm(compute_diff_dist(tmp_m, np.array(t_subseq))) for t_subseq in cl_is]
+            # print(f'Cluster {i}, size: {len(cl_is)}, Len_m: {len(tmp_m)}, cf {len(cl_is[1])}')
+            tmp_dist = [compute_seq_dist(tmp_m, np.array(t_subseq), metric=metric) for t_subseq in cl_is]
             sel_seqs = [cl_is[tmp_i] for ii, tmp_i in enumerate(np.argsort(tmp_dist)) if ii <= len(cl_is)*(max_nu)]
-            m_subseq.append(np.mean(sel_seqs, axis=0))
-            d_subseq.append([compute_diff_dist(m_subseq[-1], np.array(t_subseq)) for t_subseq in sel_seqs])
+
+            ## Compute Normal Model
+            if metric == 'euclidean' or metric == 'z-norm' or metric == 'z-norm_rev' or metric == 'zero-mean':
+                m_subseq.append(np.mean(sel_seqs, axis=0))
+            elif metric == 'dtw' or metric == 'fastDTW' or metric == 'sbd':
+                m_subseq.append(dtw_barycenter_averaging(sel_seqs).squeeze())
+                if plot_nm:
+                    plt.figure()
+                    for seq in sel_seqs:
+                        plt.plot(seq, color='gray', alpha=0.5)
+                    plt.plot(m_subseq[-1], color='blue', linewidth=2)
+                    plt.title(f'Cluster {i}, size: {len(cl_is)}')
+                    plt.show()
+            # d_subseq.append([compute_diff_dist(m_subseq[-1], np.array(t_subseq)) for t_subseq in sel_seqs])
+            d_subseq.append([compute_seq_dist(m_subseq[-1], np.array(t_subseq), metric=metric) for t_subseq in sel_seqs])
             
             cl_ids.append(i)
             nums.append(len(cl_is))
             Ws.append(longest_consecutive_sequence(inds))
         else:
+            # print(f'Reject Cluster ID: {i}, Size: {len(cl_is)}, min_size_nm: {int(min_cl_size)}')
             for k in inds: listcluster_rev[k] = -1
+            # print(listcluster_rev)
             if len(cl_is) == 1: single_subseq.append(cl_is[0])
 
     if len(m_subseq) == 0:
-        return None, None, None, None, None, None, None, None, None, None, None
+        print('No normal model found.')
+        return None, None, None, None, None, None, None, None, None, None, None, None, None, None
     ## Computing Stats.
-    d_ci, d_c_std = intra_cluster_dist(d_subseq)
+    # print(f'D: {len(d_subseq)}, each: {len(d_subseq[0])}')
+    d_ci, d_c_std = intra_cluster_dist_stat(d_subseq)
     m_tau = (d_ci+3*d_c_std)
 
     if isTrain: Sw = np.min([max_W, 2*np.max(Ws)])
@@ -644,13 +738,16 @@ def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W
 
     m_nu = __get_freq_th(seqs, Sw, cl_ids, listcluster_rev, m_subseq, m_tau, eta, max_nu, isTrain)
 
+
     set_cluster = list(set(list(listcluster_rev)))
+    elap_times['nm_compute'].append(time.perf_counter() - nm_start)
     
     if -1 in set_cluster:
         set_cluster.remove(-1)
     for i, set_cl in enumerate(set_cluster):
         ids = [j for j, c in enumerate(listcluster_rev) if c==set_cl]
         for id in ids: listcluster_rev[id] = i
+
+    elap_times['ahc'].append(time.perf_counter() - start)
     
-    
-    return listcluster_rev, Z, m_subseq, m_tau, m_nu, single_subseq, d_subseq, d_ci, d_c_std, Ws, add_pair
+    return listcluster_rev, Z, m_subseq, m_tau, m_nu, single_subseq, d_subseq, d_ci, d_c_std, Ws, add_pair, num_flip, count_flip, flips
