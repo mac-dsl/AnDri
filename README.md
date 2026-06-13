@@ -3,7 +3,7 @@
 
 This repository contains the implementation of **AnDri**, a time-series anomaly detection framework that jointly detects anomalies and adapts to evolving normal patterns through drift-aware normal pattern management.
 
-[overview.pdf](https://github.com/user-attachments/files/28907440/overview.pdf)
+<img width="2918" height="1133" alt="overview" src="https://github.com/user-attachments/assets/57b484df-baa0-4547-bcb1-b7daae22209d" />
 
 Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, anomaly detection method cognizant of concept drift. AnDri co-detects anomalies and drift, extending the types of drift considered in anomaly detection to include gradual and recurring drifts.
 - AnDri supports a dyanamic normal model where normal patterns are not fixed, but can be activated, deactivated or added over time. This adaptability enables AnDri to compute anomaly scores to the most similar active pattern.
