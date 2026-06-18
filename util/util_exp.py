@@ -240,21 +240,21 @@ def shift_time(sel_time, sel_len):
 def get_data(data_name, target=None, anom_lists=None, short=True, traffic_sel='total_flow', w_range=4, y_weight=0.5, w_weight=0.5):
     data_list, label_list = [], []
     if data_name == 'INN_Sensor':
-        dir_t = './data/processed/real iot/'
+        dir_t = './data/processed/sensor/'
         filelist_test = os.listdir(dir_t)
         filelist_test.sort()
 
     elif data_name == 'climate':
-        dir_t = './data/processed/2021_2025_precip_selected/'
+        dir_t = './data/processed/climate/'
         filelist_test_t = os.listdir(dir_t)
         filelist_test = [f for f in filelist_test_t if f.endswith('processed.csv')]
         filelist_test.sort()
         provinces, stations = [], []
 
     elif data_name == 'traffic':
-        df_stat = pd.read_csv('/home/parkj182/research/PeMS/stat_missing_station.csv', index_col=None)
+        df_stat = pd.read_csv('/home/parkj182/research/traffic/stat_missing_station.csv', index_col=None)
         stationIDs = df_stat[(df_stat['all_len']>=149396) & (df_stat['missing_hour']<=103)]['stationID'].values
-        dir_t = f'./data/processed/PeMS/101_N/drifts/'
+        dir_t = f'./data/processed/traffic/101_N/drifts/'
         filelist_test_all = os.listdir(dir_t)
         end_text = f'th_{w_range}_y_{y_weight}_w_{w_weight}'
         start_text = f'rev_{end_text}'
