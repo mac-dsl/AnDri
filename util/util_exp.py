@@ -1,5 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as plt
+######## updated 2026-10-08 ##########
 import pandas as pd
 from util.TSB_AD.metrics import metricor
 from sklearn import metrics
@@ -10,7 +10,6 @@ import re
 import pickle
 import os
 
-from util.plot_andri import find_anomaly_intervals
 from util.util_andri import find_length, running_mean
 
 import warnings
@@ -202,178 +201,41 @@ def load_pickle(filename):
     return var
 
 ###################################################################################################################
-def get_climate_label(df):
-    w_anom_lists = ['Thunderstorms', 'Heavy Rain', 'Heavy Snow']
-    df.loc[df['Precip. Amount (mm)'] > 100, 'Precip. Amount (mm)'] = 100
-    df['datetime'] = pd.to_datetime(df['Date/Time (LST)'], format='%Y-%m-%d %H:%M')
-    df['date'] = df['datetime'].dt.date
-    df = df.sort_values('datetime')
-
-    df['precip_24h'] = (df.rolling('24h', on='datetime')['Precip. Amount (mm)'].sum())
-    # dailiy_precip = (df.groupby('date', as_index=False)['Precip. Amount (mm)'].sum())
-    # df = df.merge(dailiy_precip, on='date', how='left', suffixes=('', '_daily'))
-
-    df['heavy'] = 0
-    df.loc[df['Precip. Amount (mm)'] > 4, 'heavy'] = 1
-    df.loc[df['precip_24h'] >= 10, 'heavy'] = 1
-
-    for i, tw in enumerate(w_anom_lists):
-        mask = df['Weather'].str.contains(tw, na=False)
-        df.loc[mask, 'heavy'] = 1
-
-    df['Precip. Amount (mm)'] = df['Precip. Amount (mm)'].interpolate()
-
-    return df
-
-def shift_time(sel_time, sel_len):
-    total_month = sel_time.year * 12 + sel_time.month - sel_len * 6
-    
-    year = total_month // 12
-    month = total_month % 12
-    
-    if month == 0:
-        year -= 1
-        month = 12
-
-    return datetime.datetime(year, month, sel_time.day)
-
-def get_data(data_name, target=None, anom_lists=None, short=True, traffic_sel='total_flow', w_range=4, y_weight=0.5, w_weight=0.5):
-    data_list, label_list = [], []
-    if data_name == 'INN_Sensor':
-        dir_t = './data/processed/sensor/'
-        filelist_test = os.listdir(dir_t)
-        filelist_test.sort()
-
-    elif data_name == 'climate':
-        dir_t = './data/processed/climate/'
-        filelist_test_t = os.listdir(dir_t)
-        filelist_test = [f for f in filelist_test_t if f.endswith('processed.csv')]
-        filelist_test.sort()
-        provinces, stations = [], []
-
-    elif data_name == 'traffic':
-        df_stat = pd.read_csv('/home/parkj182/research/traffic/stat_missing_station.csv', index_col=None)
-        stationIDs = df_stat[(df_stat['all_len']>=149396) & (df_stat['missing_hour']<=103)]['stationID'].values
-        dir_t = f'./data/processed/traffic/101_N/drifts/'
-        filelist_test_all = os.listdir(dir_t)
-        end_text = f'th_{w_range}_y_{y_weight}_w_{w_weight}'
-        start_text = f'rev_{end_text}'
-        
-        filelist_test_t = [f for f in filelist_test_all if f.startswith(start_text)]
-        filelist_th_t = [f for f in filelist_test_all if f.endswith(f'{end_text}.csv')]
-
-        print('LEN:', len(filelist_test_t), len(filelist_th_t), f'{end_text}.csv')
-
-        pattern = re.compile(r".*N_(\d+)_DST")
-        filelist_test = [
-            f for f in filelist_test_t
-            if (m := pattern.match(f)) and int(m.group(1)) in stationIDs
-        ]
-        filelist_th = [
-            f for f in filelist_th_t
-            if (m := pattern.match(f)) and int(m.group(1)) in stationIDs
-        ]
-        filelist_test.sort()
-        # filelist_th.sort()
-
-    for f in filelist_test:
-        # print(f)
-        if data_name in ['SensorScope', 'NAB', 'Occupancy']:
-            # if data_name == 'Occupancy' and f.split('-')[2][0] == 0:
-                # continue
-            if data_name == 'NAB' and f.split('_')[2][:3] == 'art':
-                continue
-            df_t = pd.read_csv(f'{dir_t}{f}', index_col=None, header=None)
-
-        else:
-            df_t = pd.read_csv(f'{dir_t}{f}', index_col=None)
-
-        if 'level_0' in df_t.columns:
-            df_t = df_t.drop(columns=['level_0'])
-        if data_name == 'INN_Sensor':
-            df_t['anomaly'] = df_t['anomaly_pattern'] | df_t['anomaly_point']
-            data, label = df_t['value'].to_numpy(), df_t['anomaly'].to_numpy()
-            data = data.astype(float)
+######## updated 2026-10-08 ##########
+def get_data(data_name):
+    """Read the saved univariate inputs without changing labels or selecting stations."""
+    from pathlib import Path
+    ######## updated 2026-10-09 ##########
+    folder = Path(__file__).resolve().parents[1] / 'data' / 'processed' / data_name
+    files = sorted(folder.glob('*_processed.csv' if data_name == 'climate' else '*.csv'))
+    data_list, label_list, filelist = [], [], []
+    for path in files:
+        if data_name == 'climate':
+            df = pd.read_csv(path, usecols=['data', 'label'])
+            data, label = df['data'], df['label']
         elif data_name == 'traffic':
-            df_t = pd.read_csv(f'{dir_t}{f}', index_col=None)
-            print(f)
-            data, label = df_t[traffic_sel].to_numpy(), df_t[f'{traffic_sel}_label'].to_numpy()
-        elif data_name == 'climate':
-            provinces.append(f.split('_')[0])
-            stations.append(f.split('_')[1])
-            df_t = get_climate_label(df_t)
-            init_date = datetime.datetime(2023, 7, 1)
-            start_date = shift_time(init_date, int(short))
-            df_t = df_t[df_t['datetime']>=start_date]
-            data, label = df_t['Precip. Amount (mm)'].to_numpy(), df_t['heavy'].to_numpy()
-            
-            data = data.astype(float)
-        elif data_name in ['SensorScope', 'NAB', 'Occupancy']:
-            data, label = df_t.iloc[:,0].to_numpy(), df_t.iloc[:,1].to_numpy()
+            df = pd.read_csv(path, usecols=['total_flow', 'total_flow_label'])
+            data, label = df['total_flow'], df['total_flow_label']
         else:
-            data, label = df_t['Data'].to_numpy(), df_t['Label'].to_numpy()
-            data = data.astype(float)
+            df = pd.read_csv(path, usecols=['Data', 'Label'])
+            data, label = df['Data'], df['Label']
+        data_list.append(data.to_numpy(dtype=float))
+        label_list.append(label.to_numpy(dtype=int))
+        filelist.append(path.name)
+    return data_list, label_list, filelist
 
 
-        data_list.append(data)
-        label_list.append(label)
-            
-    if data_name == 'climate':
-        print('climate_data:', len(data_list[0]))
-        return data_list, label_list, filelist_test, provinces, stations
-    elif data_name == 'traffic':
-        print('traffic_data:', len(data_list[0]))
-        return data_list, label_list, filelist_test, filelist_th, stationIDs
-    else:
-        return data_list, label_list, filelist_test
-
-### Read all dimensions and run each dimension for AnDri
+######## updated 2026-10-08 ##########
 def get_multi_data(data_name):
-    data_list, label_list = [], []
-
-    if data_name in ['SMD']:
-        ## Applied dimension reductions
-        dir_t = './data/processed/SMD/'
-        filelist_test = []
-        filelist = os.listdir(dir_t)
-        filelist_csv = [file for file in filelist if file.endswith('subset.csv')]
-
-        sel_list = [f for f in filelist_csv if f.split('-')[0] == 'machine']
-
-        for f in sel_list:
-            df = pd.read_csv(f'{dir_t}{f}')
-            # data, label = df.iloc[:,sel_columns].astype('float64').to_numpy(), df.iloc[:,-1].astype('float64').to_numpy()
-            label = df['label'].astype('float64').to_numpy()
-            for j in range(len(df.columns)-1):
-                filelist_test.append(f'{j}_{f}')
-                data_list.append(df.iloc[:,j].astype('float64').to_numpy())
-                label_list.append(label)
-
-    elif data_name == 'SWaT':
-        dir = './data/processed/SWaT/'
-        # f = 'SWaT_dataset_Jul_19_v2.csv'
-        f = 'SWaT_processed.csv'
-        df = pd.read_csv(f'{dir}{f}', index_col=None)
-        label = df['label'].to_numpy()
-
-        filelist_test = []
-        for j in range(1, len(df.columns)-1):
-            data_list.append(df.iloc[:,j].to_numpy())
+    """Read each saved feature with its existing label and training boundary."""
+    from pathlib import Path
+    folder = Path(__file__).resolve().parents[1] / 'data' / 'processed' / data_name
+    data_list, label_list, filelist = [], [], []
+    for path in sorted(folder.glob('*.csv')):
+        df = pd.read_csv(path)
+        label = df['label'].to_numpy(dtype=int)
+        for column in df.columns.drop('label'):
+            data_list.append(df[column].to_numpy(dtype=float))
             label_list.append(label)
-            filelist_test.append(f'{j}_{f}')
-
-    elif data_name == 'WADI':
-        filelist_test = []
-        dir = '/home/parkj182/research/WADI/'
-        filelist = os.listdir(dir)
-        filelist_csv = [file for file in filelist if file.endswith('processed.csv')]
-        for f in filelist_csv:
-            df = pd.read_csv(f'{dir}{f}')
-            label = df.iloc[:,-1].astype('float64').to_numpy()
-            for j in range(len(df.columns)-1):
-                filelist_test.append(f'{j}_{f}')
-                data_list.append(df.iloc[:,j].astype('float64').to_numpy())
-                label_list.append(label)
-
-
-    return data_list, label_list, filelist_test
+            filelist.append(f'{path.name}__{column}')
+    return data_list, label_list, filelist

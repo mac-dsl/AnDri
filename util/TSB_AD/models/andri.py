@@ -133,8 +133,13 @@ class windowL:
 
 class AnDri():
 
+    ########### 2026-10-09 ################
     def __init__(self,pattern_length, normalize='zero-mean', linkage_method='ward', th_reverse=5, 
-                 kadj=1, nm_len=2, overlap=0.5, max_W = 15, delta_max=15, eta=1, REVISE_SCORE=True, device_id=0, plot_nm=False):
+                 kadj=1, nm_len=2, overlap=0.5, max_W = 15, delta_max=15, eta=1, REVISE_SCORE=True, device_id=0, plot_nm=False, clustering='adaptive_ahc'):
+        ########### 2026-10-09 ################
+        if clustering not in ('adaptive_ahc', 'kshape', 'hc'):
+            raise ValueError('clustering must be adaptive_ahc, kshape, or hc')
+        self.clustering = clustering
         self.pattern_length = pattern_length
         self.normalize=normalize     
         self.overlap = overlap
@@ -323,6 +328,62 @@ class AnDri():
         self.runtime['train'].append(end_score - start_train)
         # train_times['train_score'].append(time.perf_counter() - start_train_score)
 
+    ########### 2026-10-09 ################
+    def __offline_other_clustering(self, X):
+        """Cluster fixed windows and score their distance to each cluster model."""
+        from scipy.cluster.hierarchy import linkage, fcluster
+        from scipy.spatial.distance import pdist
+
+        length = self.pattern_length
+        subseqs = np.asarray([X[i:i + length] for i in range(0, len(X) - length + 1, length)])
+        if len(subseqs) < self.kadj:
+            raise ValueError('Fewer subsequences than clusters')
+        if self.clustering == 'kshape':
+            from tslearn.clustering import KShape
+            from tslearn.metrics.cycc import y_shifted_sbd_vec
+            from tslearn.utils import to_time_series, to_time_series_dataset
+
+            model = KShape(n_clusters=self.kadj, n_init=1, random_state=0)
+            labels = model.fit_predict(subseqs)
+            aligned = []
+            for cluster_id in range(self.kadj):
+                members = subseqs[labels == cluster_id]
+                if len(members):
+                    shifted = y_shifted_sbd_vec(
+                        to_time_series(model.cluster_centers_[cluster_id]),
+                        to_time_series_dataset(members), norm_ref=-1,
+                        norms_dataset=np.linalg.norm(members, axis=1))
+                    aligned.append((cluster_id, shifted[:, :, 0]))
+        ########### 2026-10-09 ################
+        else:
+            self.Z = linkage(pdist(subseqs), method='complete')
+            labels = fcluster(self.Z, t=self.kadj, criterion='maxclust')
+            aligned = [(cluster_id, subseqs[labels == cluster_id]) for cluster_id in sorted(set(labels))]
+
+        self.listcluster = np.asarray(labels)
+        self.NMs = []
+        for _, members in aligned:
+            members = np.asarray([norm_seq(seq, self.normalize) for seq in members])
+            center = members.mean(axis=0)
+            distances = np.asarray([compute_seq_dist(center, seq, metric=self.normalize) for seq in members])
+            mean, std = float(distances.mean()), float(distances.std())
+            self.NMs.append(NormalModel(center, max(mean + 3 * std, 1e-8), 0, mean, std))
+
+        scores, selected = [], []
+        for start in range(0, len(X), length):
+            window = X[start:start + length]
+            if len(window) < length:
+                window = np.pad(window, (0, length - len(window)), mode='edge')
+            window = norm_seq(window, self.normalize)
+            values = [compute_seq_dist(nm.subseq, window, metric=self.normalize) / nm.tau for nm in self.NMs]
+            index = int(np.argmin(values))
+            count = min(length, len(X) - start)
+            scores.extend([values[index]] * count)
+            selected.extend([index] * count)
+        self.scores = np.asarray(scores)
+        self.cl_s = np.asarray(selected)
+        self.scores_rev = self.scores.copy()
+
     #  @params X: Time-series
     #  @params y: labels (not necessary)
     #  @params online: True (online), False (offline)
@@ -332,14 +393,24 @@ class AnDri():
     #  @params align: default True (for aligning scores for multiple normal patterns)
     #  @params min_size: ratio of minimum size of cluster (R_{min})
     def fit(self, X, y=None, online=True, delta=0, training_len=None, stepwise=False, align=True, non_static =True, min_size=0.025, rollback=True):
+        ########### 2026-10-09 ################
+        if online and self.clustering != 'adaptive_ahc':
+            raise ValueError('kshape and hc support offline fitting only')
+        if not online and self.clustering != 'adaptive_ahc':
+            self.ts = np.asarray(X).reshape(-1)
+            self.y = y
+            self.rollback = rollback
+            self.__offline_other_clustering(self.ts)
+            return self
         ## if overlapping is not 1, revise for loop 
         self.ts = X
         self.y = y
         self.rollback = rollback
 
         if online:
-            if training_len < len(X)*0.05:
-                print('[ERR]: Need to specify training length (>= 10% of data)')
+            ######## updated 2026-10-08 ##########
+            if training_len < len(X)*0.02:
+                print('[ERR]: Need to specify training length (>= 2% of data)')
                 return 0
             
             # min_size = min_size*training_len/len(X) if min_size <0 else min_size

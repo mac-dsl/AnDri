@@ -1,112 +1,64 @@
 # Adaptive Anomaly Detection in the Presence of Concept Drift
-# Overview
 
-This repository contains the implementation of **AnDri**, a time-series anomaly detection framework that jointly detects anomalies and adapts to evolving normal patterns through drift-aware normal pattern management.
+AnDri detects time series anomalies while adapting its normal patterns to concept drift. Its adaptive adjacent hierarchical clustering (AHC) supports gradual and recurring changes.
 
-<img width="2918" height="1133" alt="overview" src="https://github.com/user-attachments/assets/57b484df-baa0-4547-bcb1-b7daae22209d" />
+<img width="2918" height="1133" alt="AnDri overview" src="https://github.com/user-attachments/assets/57b484df-baa0-4547-bcb1-b7daae22209d" />
 
-Andri (Anomaly detection in the presence of Drift) is an adaptive, time-series, anomaly detection method cognizant of concept drift. AnDri co-detects anomalies and drift, extending the types of drift considered in anomaly detection to include gradual and recurring drifts.
-- AnDri supports a dyanamic normal model where normal patterns are not fixed, but can be activated, deactivated or added over time. This adaptability enables AnDri to compute anomaly scores to the most similar active pattern.
-- We introduce a new time-series clustering method, Adajcent Hierarchical Clustering (AHC), for learning normal patterns that respect their temporal locality; critical for detecting short-lived normal patterns that are overlooked by existing methods.
-
-## Repository Structure
+## Repository structure
 
 ```text
 .
-├── data/                  # Processed datasets
-├── results/               # Output directory
-├── sample.ipynb           # Example notebook
-├── test_andri.py          # Example script
+├── data/processed/        # Ready-to-run dataset CSVs
+│   ├── climate/
+│   ├── traffic/
+│   ├── NAB/
+│   ├── Environ/
+│   ├── CATSv2/
+│   └── SMD/
 ├── util/
-│   ├── ahc.py
-│   ├── analy.py
-│   ├── plot_andri.py
-│   ├── util_andri.py
-│   ├── util_data.py
-│   ├── util_exp.py
-│   └── TSB_AD/
-│       ├── metrics.py
-│       ├── slidingWindows.py
-│       └── models/
-│           └── andri.py
-├── environment.yml
+│   ├── ahc.py             # Adaptive AHC and timing breakdown
+│   ├── util_exp.py        # Dataset loading and evaluation
+│   └── TSB_AD/models/andri.py
+├── test_andri.py          # Offline/online experiment entry point
+├── sample.ipynb           # Step-by-step example
+├── draw_figure.ipynb      # Paper figure notebook
+├── results/tested/        # Committed figure/table inputs
+├── png/                   # Generated paper figures (PDF)
 ├── requirements.txt
-└── README.md
+└── environment.yml
 ```
 
-## References of this repository
-- https://github.com/TheDatumOrg/TSB-UAD
-- https://github.com/imperial-qore/TranAD
-- https://moa.cms.waikato.ac.nz
-- https://github.com/szamani20/time-series
-- https://github.com/kaist-dmlab/ARCUS
-- https://github.com/exathlonbenchmark/divad
-- https://github.com/NetManAIOps/OmniAnomaly
-
-
-## References
-- TBA
-
-## Contributors
-- Jongjun Park
+`data/processed/` contains the current experiment inputs. `test_andri.py` reads `climate/*_processed.csv` (`data`, `label`), `traffic/*.csv` (`total_flow`, `total_flow_label`), and NAB/Environ CSVs (`Data`, `Label`). CATSv2 CSVs contain a `label` column and sensor columns, which are evaluated separately. The dataset sources are listed in [data/processed/README_Data.md](data/processed/README_Data.md).
 
 ## Installation
-
-### Option 1: Conda (recommended)
 
 ```bash
 conda env create -f environment.yml
 conda activate andri_repo
 ```
 
-### Option 2: pip
-
-```bash
-pip install -r requirements.txt
-```
-
-## Quick Start
-
-Run test_andri.py
-
-```bash
-python3 test_andri.py -data climate -method AnDri
-```
-
-## Data
-
-Example datasets are organized under:
-
-```
-data/
-└── processed/
-    ├── 2021_2025_precip_selected/
-    ├── PeMS/
-    ├── real iot/
-    └── SWaT/
-```
-
-## Results
-
-Generated anomaly scores, figures, and other outputs are saved in the `results/` directory.
+Alternatively, use Python 3.11 and `pip install -r requirements.txt`.
 
 ## Usage
-We include main algorithms, 
-- Adjacent Hierarchical Clustering (/util/ahc.py)
-- AnDri (/util/TSB_AD/models/andri.py)
-along with a simple example to show how it runs. (sample.ipynb)
 
-sample.ipynb
-- This notebook includes step-by-step procedure of running AnDri.
-- Using anomaly injected Elec. dataset (one-sample with 10% anomaly injection over uniform distribution), we computed AnDri (offline) and (online)
+Run from the repository root:
 
-AnDri's parameters:
-- 'normalize': we support three distance metrics, (1) 'z-norm': Z-normalized distance, (2) 'zero-mean': Z-norm distance without devision by standard deviation, (3) 'Euclidean'
-- 'kadj': k-AHC, k-hop distance to compare
-- 'nm_len': length of normal pattern (nm_len x l (slidingWindow))
-- 'min_size': same paramter of R_{min}, minimum size of cluster
-- 'max_W': maximum length of moving window for detecting concept drift
-- 'train_len': Length of trianing set (i.e., 0.2 for 20%)
-- 
+```bash
+python test_andri.py -data climate
+python test_andri.py -data NAB -clustering hc -k 5
+python test_andri.py -data traffic -clustering kshape -k 5
+```
 
-  
+`-data` accepts `climate`, `traffic`, `NAB`, `Environ`, or `CATSv2`. The current script selects the first sorted input file for each dataset; for CATSv2 it selects sensor data from `138_CATSv2_id_1_Sensor_tr_16568_1st_16668_subset.csv`. It does not run a whole-dataset benchmark in one invocation. Climate and traffic use a 24-point window and the first 8,760 points for training. Other datasets use the `_tr_` boundary in the filename and an automatically selected window length.
+
+`-clustering` defaults to `adaptive_ahc`, which runs both offline and online AnDri. `hc` uses the independent hierarchical clustering implementation, and `kshape` uses KShape; both run offline only. Other options include `-nm_len` (normal pattern length multiplier), `-normalize`, `-k` (cluster count for `hc`/`kshape`, neighborhood size for AHC), `-linkage`, `-max_W`, `-delta_max`, `-rmin`, `-step`, and `-rollback`. Run `python test_andri.py -h` for their defaults.
+
+Results are written under `results/<dataset>/`. `time_all.csv` (or `time_all_hc.csv` / `time_all_kshape.csv`) records elapsed wall-clock seconds for each run and, for AHC, the offline and online flip counts. The model also stores stage timing lists in `model.runtime`; AHC records its initialization, rollback, normal-model computation, and total times in `util.ahc.elap_times`. These are detailed measurements, separate from the script's wall-clock totals. Generated experiment results are local and excluded from Git.
+
+## Paper figures
+
+`draw_figure.ipynb` reads the saved tables and plot inputs in `results/tested/` and draws the paper figures. The figure PDFs are in `png/`. The notebook uses the saved CSVs and does not rerun model fitting.
+
+## Related projects
+
+[TSB-UAD](https://github.com/TheDatumOrg/TSB-UAD), [TranAD](https://github.com/imperial-qore/TranAD), [ARCUS](https://github.com/kaist-dmlab/ARCUS), [DIVAD](https://github.com/exathlonbenchmark/divad), and [OmniAnomaly](https://github.com/NetManAIOps/OmniAnomaly).

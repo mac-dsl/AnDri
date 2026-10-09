@@ -1,5 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as plt
+######## updated 2026-10-08 ##########
 from scipy.cluster.hierarchy import distance
 from tslearn.barycenters import dtw_barycenter_averaging, dtw_barycenter_averaging_petitjean
 from util.util_andri import longest_consecutive_sequence, compute_seq_dist, intra_cluster_dist_stat
@@ -705,6 +705,8 @@ def adaptive_ahc(seqs, linkage_method='ward', th_reverse=5, kadj=1, eta=1, max_W
             elif metric == 'dtw' or metric == 'fastDTW' or metric == 'sbd':
                 m_subseq.append(dtw_barycenter_averaging(sel_seqs).squeeze())
                 if plot_nm:
+                    ######## updated 2026-10-08 ##########
+                    import matplotlib.pyplot as plt
                     plt.figure()
                     for seq in sel_seqs:
                         plt.plot(seq, color='gray', alpha=0.5)

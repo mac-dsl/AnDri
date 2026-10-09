@@ -1,0 +1,11 @@
+# Local execution artifacts
+/results/*
+!/results/tested/
+**/logs/
+**/__pycache__/
+*.py[cod]
+**/.DS_Store
+**/._*
+**/.ipynb_checkpoints/
+.pytest_cache/
+.venv/
