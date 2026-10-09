@@ -53,16 +53,7 @@ def main():
     output = Path(__file__).resolve().parent / 'results' / args.data
     output.mkdir(parents=True, exist_ok=True)
     time_all = []
-    first_file = filelist[0].split('__')[0]
-    ######## updated 2026-10-08 ##########
-    # Temporary CATSv2 smoke test uses id_1; remove this selection with the one-file condition.
-    if args.data == 'CATSv2':
-        first_file = '138_CATSv2_id_1_Sensor_tr_16568_1st_16668_subset.csv'
-
     for data, label, file_name in zip(data_list, label_list, filelist):
-        # Temporary one-file test: remove this condition to run every input file.
-        if file_name.split('__')[0] != first_file:
-            continue
         data = np.nan_to_num(data, nan=0).reshape(-1)
         label = label.reshape(-1)
         if args.data in ('climate', 'traffic'):

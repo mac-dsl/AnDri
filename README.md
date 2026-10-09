@@ -41,19 +41,63 @@ Alternatively, use Python 3.11 and `pip install -r requirements.txt`.
 
 ## Usage
 
-Run from the repository root:
+Run the script from the repository root. One invocation processes **all matching input CSV files** in the selected dataset folder. For CATSv2, it runs each sensor column of every CSV separately.
+
+### Data setup
+
+Place the input files under `data/processed/`. The script reads these columns and file patterns:
+
+```text
+data/processed/climate/*_processed.csv   data, label
+data/processed/traffic/*.csv             total_flow, total_flow_label
+data/processed/NAB/*.csv                 Data, Label
+data/processed/Environ/*.csv             Data, Label
+data/processed/CATSv2/*.csv              label + one or more sensor columns
+```
+
+Choose one dataset per command:
 
 ```bash
 python test_andri.py -data climate
-python test_andri.py -data NAB -clustering hc -k 5
+python test_andri.py -data traffic
+python test_andri.py -data NAB
+python test_andri.py -data Environ
+python test_andri.py -data CATSv2
+```
+
+Climate and traffic use a 24-point window and the first 8,760 points for training. NAB, Environ, and CATSv2 take the training boundary from `_tr_<number>` in each filename and choose the window length from the data.
+
+### Parameter setup
+
+`adaptive_ahc` is the default and runs both offline and online modes. `hc` (independent hierarchical clustering) and `kshape` run offline only. Select a clustering method and its parameters in the command:
+
+```bash
+python test_andri.py -data climate -clustering adaptive_ahc -k 5 -nm_len 2
+python test_andri.py -data NAB -clustering hc -k 5 -linkage ward
 python test_andri.py -data traffic -clustering kshape -k 5
 ```
 
-`-data` accepts `climate`, `traffic`, `NAB`, `Environ`, or `CATSv2`. The current script selects the first sorted input file for each dataset; for CATSv2 it selects sensor data from `138_CATSv2_id_1_Sensor_tr_16568_1st_16668_subset.csv`. It does not run a whole-dataset benchmark in one invocation. Climate and traffic use a 24-point window and the first 8,760 points for training. Other datasets use the `_tr_` boundary in the filename and an automatically selected window length.
+`-k` is the AHC neighborhood size for `adaptive_ahc`, or the cluster count for `hc` and `kshape`. Other options are `-normalize`, `-max_W`, `-delta_max`, `-rmin`, `-step`, and `-rollback`. See their defaults with:
 
-`-clustering` defaults to `adaptive_ahc`, which runs both offline and online AnDri. `hc` uses the independent hierarchical clustering implementation, and `kshape` uses KShape; both run offline only. Other options include `-nm_len` (normal pattern length multiplier), `-normalize`, `-k` (cluster count for `hc`/`kshape`, neighborhood size for AHC), `-linkage`, `-max_W`, `-delta_max`, `-rmin`, `-step`, and `-rollback`. Run `python test_andri.py -h` for their defaults.
+```bash
+python test_andri.py -h
+```
 
-Results are written under `results/<dataset>/`. `time_all.csv` (or `time_all_hc.csv` / `time_all_kshape.csv`) records elapsed wall-clock seconds for each run and, for AHC, the offline and online flip counts. The model also stores stage timing lists in `model.runtime`; AHC records its initialization, rollback, normal-model computation, and total times in `util.ahc.elap_times`. These are detailed measurements, separate from the script's wall-clock totals. Generated experiment results are local and excluded from Git.
+### Result data
+
+Each run writes its files under `results/<dataset>/`. The input name, normal-pattern length, cluster setting, and optional clustering method are included in the filename. For CATSv2, the sensor name is included as well.
+
+```text
+results/<dataset>/
+  AnDri_<input>_nm_<n>_k_<k>_clf_off.pickle       # offline model
+  AnDri_<input>_nm_<n>_k_<k>_clf_on.pickle        # online model, AHC only
+  AnDri_<input>_nm_<n>_k_<k>_scores_rev.pickle    # normalized score arrays
+  AnDri_<input>_nm_<n>_k_<k>_results_org.csv      # evaluation metrics
+  time_all.csv                                    # AHC wall-clock seconds and flips
+  time_all_hc.csv / time_all_kshape.csv           # offline wall-clock seconds
+```
+
+For `hc` and `kshape`, filenames also contain the clustering method. Each timing CSV has one row per processed input (one row per sensor for CATSv2). The saved model's `runtime` attribute contains detailed stage timings; adaptive AHC also records stage timings in `util.ahc.elap_times`. Generated experiment results are excluded from Git; `results/tested/` contains the committed paper figure and table inputs.
 
 ## Paper figures
 
