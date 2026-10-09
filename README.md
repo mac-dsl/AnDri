@@ -59,6 +59,6 @@ Results are written under `results/<dataset>/`. `time_all.csv` (or `time_all_hc.
 
 `draw_figure.ipynb` reads the saved tables and plot inputs in `results/tested/` and draws the paper figures. The figure PDFs are in `png/`. The notebook uses the saved CSVs and does not rerun model fitting.
 
-## Related projects
+## References of Repository
 
-[TSB-UAD](https://github.com/TheDatumOrg/TSB-UAD), [TranAD](https://github.com/imperial-qore/TranAD), [ARCUS](https://github.com/kaist-dmlab/ARCUS), [DIVAD](https://github.com/exathlonbenchmark/divad), and [OmniAnomaly](https://github.com/NetManAIOps/OmniAnomaly).
+[TSB-UAD](https://github.com/TheDatumOrg/TSB-UAD), [TranAD](https://github.com/imperial-qore/TranAD), [ARCUS](https://github.com/kaist-dmlab/ARCUS), [DIVAD](https://github.com/exathlonbenchmark/divad), [OmniAnomaly](https://github.com/NetManAIOps/OmniAnomaly), [METER](https://github.com/zjiaqi725/METER), and [CANDI](https://github.com/kimanki/CANDI).
